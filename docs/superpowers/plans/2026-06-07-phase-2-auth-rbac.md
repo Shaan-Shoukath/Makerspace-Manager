@@ -523,6 +523,15 @@ def test_isstaff_rejects_suspended_after_login():
     req = rf.get("/")
     req.user = suspended
     assert IsStaff().has_permission(req, None) is False
+
+
+def test_issuperadmin_rejects_suspended_superadmin():
+    rf = APIRequestFactory()
+    su = make_user("p4", role=User.Role.SUPERADMIN,
+                   access_status=User.AccessStatus.SUSPENDED)
+    req = rf.get("/")
+    req.user = su
+    assert IsSuperadmin().has_permission(req, None) is False
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -555,10 +564,13 @@ def _active_staff(user):
 
 class IsSuperadmin(BasePermission):
     def has_permission(self, request, view):
-        u = request.user
-        return bool(getattr(u, "is_authenticated", False)) and (
-            u.is_superuser or u.role == User.Role.SUPERADMIN
-        )
+        u = getattr(request, "user", None)
+        if not getattr(u, "is_authenticated", False):
+            return False
+        # re-review fix: a suspended/restricted superadmin must also be blocked.
+        if u.access_status != User.AccessStatus.ACTIVE:
+            return False
+        return u.is_superuser or u.role == User.Role.SUPERADMIN
 
 
 class IsStaff(BasePermission):
@@ -694,6 +706,8 @@ Expected: FAIL (404 — login route not wired).
 `backend/apps/accounts/auth_cookies.py`:
 
 ```python
+from urllib.parse import urlsplit
+
 from django.conf import settings
 from rest_framework.exceptions import PermissionDenied
 
@@ -722,18 +736,30 @@ def clear_refresh_cookies(response):
     response.delete_cookie(settings.AUTH_REFRESH_COOKIE, path=settings.AUTH_COOKIE_PATH)
 
 
+def _origin_allowed(raw):
+    """Exact scheme://host[:port] match against the allowlist (no prefix bypass).
+
+    re-review fix: `startswith` accepted `http://localhost:5000.evil.test`. Parse the
+    Origin/Referer and compare the exact scheme+netloc."""
+    if not raw:
+        return False
+    parts = urlsplit(raw)
+    if not parts.scheme or not parts.netloc:
+        return False
+    candidate = f"{parts.scheme}://{parts.netloc}"
+    return candidate in set(settings.CORS_ALLOWED_ORIGINS)
+
+
 def assert_csrf(request):
     """CSRF guard for cookie-bearing endpoints — refresh & logout (review fixes #1, #8).
 
     Requires the custom header to be PRESENT (a non-simple header forces a CORS preflight
-    that an attacker origin cannot pass) AND the Origin/Referer to be in the allowlist.
-    No readable cookie is needed, so this works across separate origins."""
+    that an attacker origin cannot pass) AND the Origin/Referer to exactly match an
+    allowlisted origin. No readable cookie is needed, so this works across separate origins."""
     if settings.AUTH_REFRESH_CSRF_HEADER not in request.headers:
         raise PermissionDenied("Missing CSRF header.")
     origin = request.headers.get("Origin") or request.headers.get("Referer", "")
-    if not origin or not any(
-        origin.startswith(allowed) for allowed in settings.CORS_ALLOWED_ORIGINS
-    ):
+    if not _origin_allowed(origin):
         raise PermissionDenied("Origin not allowed.")
 ```
 
@@ -866,6 +892,16 @@ def test_refresh_rejected_from_unknown_origin():
     client = APIClient()
     _login(client)
     resp = client.post(REFRESH, HTTP_X_REFRESH_CSRF="1", HTTP_ORIGIN="https://evil.test")
+    assert resp.status_code == 403
+
+
+def test_refresh_rejected_on_origin_prefix_bypass():
+    # Exact-match guard: a look-alike host must not pass (re-review fix).
+    client = APIClient()
+    _login(client)
+    resp = client.post(
+        REFRESH, HTTP_X_REFRESH_CSRF="1", HTTP_ORIGIN="http://localhost:5000.evil.test"
+    )
     assert resp.status_code == 403
 
 
