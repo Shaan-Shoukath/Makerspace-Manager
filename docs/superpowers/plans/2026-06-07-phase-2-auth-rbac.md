@@ -4,7 +4,7 @@
 
 **Goal:** Staff (superadmin/admin/guest-admin) can log into a separate-origin frontend via JWT, and every staff query is permission-checked and scoped to assigned makerspaces.
 
-**Architecture:** `djangorestframework-simplejwt` issues a short-lived access token (returned in the JSON body, held in browser memory) and a long-lived refresh token (set as a cross-site `HttpOnly; Secure; SameSite=None` cookie scoped to the refresh path, protected by a double-submit CSRF cookie/header). A single RBAC module (`apps/accounts/rbac.py`) owns the 4-role permission matrix and `scope_by_makerspace`; DRF permission classes + a queryset mixin reuse it. New surface mounts under `/api/v1/`; existing public routes are aliased there without breaking.
+**Architecture:** `djangorestframework-simplejwt` issues a short-lived access token (returned in the JSON body, held in browser memory) and a long-lived refresh token (set as a cross-site `HttpOnly; Secure; SameSite=None`, `max_age`-bounded cookie scoped to the refresh path). The refresh and logout endpoints are CSRF-defended by requiring a custom header (forces a CORS preflight an attacker origin can't pass) plus an explicit Origin-allowlist check — the cross-origin-correct alternative to an unreadable double-submit cookie. A single RBAC module (`apps/accounts/rbac.py`) owns the 4-role permission matrix (keyed on per-makerspace `MakerspaceMembership.role`) and `scope_by_makerspace`; DRF defaults to deny-by-default with a `StaffAPIView` base that auto-scopes querysets. New surface mounts under `/api/v1/`; existing public routes are aliased there without breaking.
 
 **Tech Stack:** Django 5.1, DRF, djangorestframework-simplejwt (+ token_blacklist), django-cors-headers, pytest-django; React 18 + TS + Vite + TanStack Query + react-router v6.
 
@@ -78,8 +78,9 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
-    # Public endpoints opt into AllowAny explicitly; staff views require auth + role.
-    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.AllowAny",),
+    # DENY BY DEFAULT (review fix #4): every view requires auth unless it explicitly
+    # opts into AllowAny. Public views are marked AllowAny in Step 3b.
+    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
 }
 
 SIMPLE_JWT = {
@@ -92,11 +93,19 @@ SIMPLE_JWT = {
 
 # Cross-site refresh cookie (frontends live on separate origins).
 AUTH_REFRESH_COOKIE = "refresh_token"
-AUTH_CSRF_COOKIE = "refresh_csrf"          # readable double-submit token
-AUTH_CSRF_HEADER = "X-Refresh-CSRF"        # client echoes the csrf cookie here
+# CSRF defense for the cookie-bearing endpoints (refresh/logout): the view requires
+# this custom header to be PRESENT — a non-simple header forces a CORS preflight that
+# an attacker's origin cannot pass — AND validates the Origin header against the
+# allowlist (review fixes #1, #8). The header VALUE is not a secret; presence + Origin
+# is the defense. This works cross-origin where a readable double-submit cookie cannot.
+AUTH_REFRESH_CSRF_HEADER = "X-Refresh-CSRF"
 AUTH_COOKIE_PATH = "/api/v1/auth/"
-AUTH_COOKIE_SECURE = env.bool("AUTH_COOKIE_SECURE", default=not DEBUG)
+# SameSite=None REQUIRES Secure or browsers silently drop the cookie (review fix #2).
+# Prod (separate origins over HTTPS): SAMESITE=None, SECURE=True.
+# Local dev: serve the frontend through a same-origin Vite proxy to the API and set
+# AUTH_COOKIE_SAMESITE=Lax + AUTH_COOKIE_SECURE=False via .env (see Step 3c note).
 AUTH_COOKIE_SAMESITE = env("AUTH_COOKIE_SAMESITE", default="None")
+AUTH_COOKIE_SECURE = env.bool("AUTH_COOKIE_SECURE", default=True)
 
 CORS_ALLOW_CREDENTIALS = True
 ```
@@ -107,10 +116,58 @@ Also widen the HMAC prefix list so the aliased v1 public route stays guarded —
     default=["/api/public/", "/api/v1/public/"],
 ```
 
+> **Deployment note (review fix #9):** any environment that sets `HMAC_PROTECTED_PATH_PREFIXES` explicitly will NOT pick up this new default. Update `.env.example` and document that deployments must add `/api/v1/public/` to the env value, or the aliased v1 public route will be unguarded. Task 14 smoke-tests both `/api/public/...` and `/api/v1/public/...`.
+
 And add the CSRF header to allowed CORS headers (`CORS_ALLOW_HEADERS` line):
 
 ```python
 CORS_ALLOW_HEADERS = (*default_headers, "x-client-id", "x-signature", "x-timestamp", "x-refresh-csrf")
+```
+
+- [ ] **Step 3b: Keep public endpoints open under deny-by-default (review fix #4)**
+
+Because the default is now `IsAuthenticated`, the existing public views MUST opt into
+`AllowAny` or the public inventory flow breaks. In `backend/apps/inventory/views.py`, add
+the import and set `permission_classes` on both views:
+
+```python
+from rest_framework.permissions import AllowAny
+# ...
+class PublicMakerspaceListView(ListAPIView):
+    permission_classes = [AllowAny]
+    serializer_class = PublicMakerspaceSerializer
+    # ... unchanged ...
+
+class PublicInventoryListView(ListAPIView):
+    permission_classes = [AllowAny]
+    serializer_class = PublicProductSerializer
+    # ... unchanged ...
+```
+
+The existing public-inventory tests (`tests/test_public_inventory.py`) are the regression
+guard — they must still pass in Step 5.
+
+- [ ] **Step 3c: Document the local-dev cookie strategy (review fix #2)**
+
+Add to `backend/.env.example` (and note in CLAUDE.md):
+
+```
+# Production (separate HTTPS origins): leave defaults (SameSite=None, Secure=True).
+# Local dev: serve the frontend via a same-origin Vite proxy to :8000 and set:
+# AUTH_COOKIE_SAMESITE=Lax
+# AUTH_COOKIE_SECURE=False
+AUTH_COOKIE_SAMESITE=None
+AUTH_COOKIE_SECURE=True
+```
+
+In `frontend/vite.config.ts`, add a dev proxy so the browser talks to the frontend origin
+only (making the refresh cookie first-party in dev):
+
+```typescript
+server: {
+  port: 5000,
+  proxy: { "/api": { target: "http://localhost:8000", changeOrigin: true } },
+},
 ```
 
 - [ ] **Step 4: Migrate the blacklist tables**
@@ -327,6 +384,21 @@ def test_admin_cannot_transfer_stock():
     s = make_space("z2")
     MakerspaceMembership.objects.create(user=admin, makerspace=s, role="admin")
     assert rbac.can(admin, rbac.Action.TRANSFER_STOCK, s.id) is False
+
+
+def test_membership_role_overrides_global_role():
+    # Globally `admin`, but only a guest_admin member of THIS makerspace.
+    u = make_user("mix", role=User.Role.ADMIN)
+    s = make_space("mx")
+    MakerspaceMembership.objects.create(user=u, makerspace=s, role="guest_admin")
+    assert rbac.can(u, rbac.Action.ACCEPT_REQUEST, s.id) is False  # guest can't accept
+    assert rbac.can(u, rbac.Action.ISSUE_REQUEST, s.id) is True    # guest can issue
+
+
+def test_non_member_denied_even_with_global_staff_role():
+    u = make_user("nm", role=User.Role.ADMIN)
+    s = make_space("nm1")  # no membership created
+    assert rbac.can(u, rbac.Action.VIEW_INVENTORY, s.id) is False
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -338,6 +410,14 @@ Expected: FAIL (`AttributeError: module ... has no attribute 'Action'`).
 
 Append to `apps/accounts/rbac.py`:
 
+Add the import for `MakerspaceMembership` at the top of `rbac.py`:
+
+```python
+from apps.makerspaces.models import MakerspaceMembership
+```
+
+Then append:
+
 ```python
 class Action:
     VIEW_INVENTORY = "view_inventory"
@@ -348,8 +428,8 @@ class Action:
     ISSUE_REQUEST = "issue_request"
     RETURN_REQUEST = "return_request"
     MANAGE_QR = "manage_qr"
-    TRANSFER_STOCK = "transfer_stock"     # superadmin only
-    MANAGE_STAFF = "manage_staff"         # superadmin only
+    TRANSFER_STOCK = "transfer_stock"        # superadmin only
+    MANAGE_STAFF = "manage_staff"            # superadmin only
     MANAGE_MAKERSPACE = "manage_makerspace"  # superadmin only
 
 _ADMIN_ACTIONS = {
@@ -360,25 +440,38 @@ _ADMIN_ACTIONS = {
 _GUEST_ADMIN_ACTIONS = {
     Action.VIEW_INVENTORY, Action.ASSIGN_BOX, Action.ISSUE_REQUEST,
 }
-_ROLE_ACTIONS = {
-    User.Role.ADMIN: _ADMIN_ACTIONS,
-    User.Role.GUEST_ADMIN: _GUEST_ADMIN_ACTIONS,
+# Authority for non-superadmins is keyed on the PER-MAKERSPACE membership role,
+# NOT the global User.role (review fix #3). A user who is globally `admin` but only a
+# guest_admin member of makerspace B gets only guest_admin actions in B.
+_MEMBERSHIP_ROLE_ACTIONS = {
+    MakerspaceMembership.Role.ADMIN: _ADMIN_ACTIONS,
+    MakerspaceMembership.Role.GUEST_ADMIN: _GUEST_ADMIN_ACTIONS,
 }
 
 
+def membership_role(actor, makerspace_id):
+    """Return the actor's MakerspaceMembership.role for this makerspace, or None."""
+    membership = actor.makerspace_memberships.filter(
+        makerspace_id=makerspace_id
+    ).first()
+    return membership.role if membership else None
+
+
 def can(actor, action, makerspace_id=None):
-    """True if `actor` may perform `action` (optionally within `makerspace_id`)."""
+    """True if `actor` may perform `action` within `makerspace_id`.
+
+    Superadmin: everything. Everyone else: authority is per-makerspace, so a
+    makerspace_id is required and the membership role decides the allowed actions."""
     if actor is None or not getattr(actor, "is_authenticated", False):
         return False
     if actor.is_superuser or actor.role == User.Role.SUPERADMIN:
         return True
-    allowed = _ROLE_ACTIONS.get(actor.role, set())
-    if action not in allowed:
-        return False
     if makerspace_id is None:
-        return True
-    scope = resolve_scope(actor)
-    return scope is ALL or makerspace_id in scope
+        return False
+    role = membership_role(actor, makerspace_id)
+    if role is None:
+        return False
+    return action in _MEMBERSHIP_ROLE_ACTIONS.get(role, set())
 ```
 
 - [ ] **Step 4: Run to verify pass**
@@ -421,6 +514,15 @@ def test_permission_classes_basic():
     req.user = guest
     assert IsSuperadmin().has_permission(req, None) is False
     assert IsStaff().has_permission(req, None) is True
+
+
+def test_isstaff_rejects_suspended_after_login():
+    rf = APIRequestFactory()
+    suspended = make_user("p3", role=User.Role.ADMIN,
+                          access_status=User.AccessStatus.SUSPENDED)
+    req = rf.get("/")
+    req.user = suspended
+    assert IsStaff().has_permission(req, None) is False
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -433,8 +535,9 @@ Expected: FAIL (`ModuleNotFoundError: apps.accounts.permissions`).
 `backend/apps/accounts/permissions.py`:
 
 ```python
-"""DRF permission classes + scoping mixin built on the rbac module."""
-from rest_framework.permissions import BasePermission
+"""DRF permission classes + scoping mixin + staff base view built on the rbac module."""
+from rest_framework.generics import GenericAPIView
+from rest_framework.permissions import BasePermission, IsAuthenticated
 
 from apps.accounts import rbac
 from apps.accounts.models import User
@@ -442,9 +545,12 @@ from apps.accounts.models import User
 STAFF_ROLES = (User.Role.SUPERADMIN, User.Role.ADMIN, User.Role.GUEST_ADMIN)
 
 
-def _role(request):
-    u = getattr(request, "user", None)
-    return getattr(u, "role", None) if getattr(u, "is_authenticated", False) else None
+def _active_staff(user):
+    return bool(
+        getattr(user, "is_authenticated", False)
+        and user.role in STAFF_ROLES
+        and user.access_status == User.AccessStatus.ACTIVE
+    )
 
 
 class IsSuperadmin(BasePermission):
@@ -456,8 +562,13 @@ class IsSuperadmin(BasePermission):
 
 
 class IsStaff(BasePermission):
+    """Authenticated staff whose access_status is still ACTIVE.
+
+    Re-checking access_status here — not only at login — bounds a suspended user's
+    remaining access to the (short) access-token lifetime (review fix #5)."""
+
     def has_permission(self, request, view):
-        return _role(request) in STAFF_ROLES
+        return _active_staff(getattr(request, "user", None))
 
 
 class HasMakerspaceAction(BasePermission):
@@ -487,6 +598,16 @@ class MakerspaceScopedQuerysetMixin:
         return rbac.scope_by_makerspace(
             self.request.user, qs, self.makerspace_scope_field
         )
+
+
+class StaffAPIView(MakerspaceScopedQuerysetMixin, GenericAPIView):
+    """Base for ALL staff endpoints: authenticated + active staff + auto-scoped queryset.
+
+    Future phases subclass this so the invariant 'every staff query is makerspace-scoped'
+    is enforced by default rather than by remembering to add a mixin (review fix #4). Add
+    `required_action` + `HasMakerspaceAction` to a subclass for per-action checks."""
+
+    permission_classes = [IsAuthenticated, IsStaff]
 ```
 
 - [ ] **Step 4: Run to verify pass**
@@ -573,29 +694,47 @@ Expected: FAIL (404 — login route not wired).
 `backend/apps/accounts/auth_cookies.py`:
 
 ```python
-import secrets
-
 from django.conf import settings
+from rest_framework.exceptions import PermissionDenied
+
+
+def _refresh_max_age():
+    return int(settings.SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds())
 
 
 def set_refresh_cookies(response, refresh_token, request=None):
-    """Set the httpOnly refresh cookie + readable double-submit CSRF cookie."""
-    common = {
-        "secure": settings.AUTH_COOKIE_SECURE,
-        "samesite": settings.AUTH_COOKIE_SAMESITE,
-        "path": settings.AUTH_COOKIE_PATH,
-    }
+    """Set the long-lived httpOnly refresh cookie.
+
+    Explicit max_age (review fix #7) — without it the cookie would be a session cookie
+    and die on browser close, despite the 7-day token lifetime."""
     response.set_cookie(
-        settings.AUTH_REFRESH_COOKIE, str(refresh_token), httponly=True, **common
-    )
-    response.set_cookie(
-        settings.AUTH_CSRF_COOKIE, secrets.token_urlsafe(32), httponly=False, **common
+        settings.AUTH_REFRESH_COOKIE,
+        str(refresh_token),
+        max_age=_refresh_max_age(),
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite=settings.AUTH_COOKIE_SAMESITE,
+        path=settings.AUTH_COOKIE_PATH,
     )
 
 
 def clear_refresh_cookies(response):
-    for name in (settings.AUTH_REFRESH_COOKIE, settings.AUTH_CSRF_COOKIE):
-        response.delete_cookie(name, path=settings.AUTH_COOKIE_PATH)
+    response.delete_cookie(settings.AUTH_REFRESH_COOKIE, path=settings.AUTH_COOKIE_PATH)
+
+
+def assert_csrf(request):
+    """CSRF guard for cookie-bearing endpoints — refresh & logout (review fixes #1, #8).
+
+    Requires the custom header to be PRESENT (a non-simple header forces a CORS preflight
+    that an attacker origin cannot pass) AND the Origin/Referer to be in the allowlist.
+    No readable cookie is needed, so this works across separate origins."""
+    if settings.AUTH_REFRESH_CSRF_HEADER not in request.headers:
+        raise PermissionDenied("Missing CSRF header.")
+    origin = request.headers.get("Origin") or request.headers.get("Referer", "")
+    if not origin or not any(
+        origin.startswith(allowed) for allowed in settings.CORS_ALLOWED_ORIGINS
+    ):
+        raise PermissionDenied("Origin not allowed.")
 ```
 
 - [ ] **Step 4: Implement serializer + payload**
@@ -638,6 +777,7 @@ class LoginSerializer(TokenObtainPairSerializer):
 `backend/apps/accounts/views.py`:
 
 ```python
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView
 
@@ -646,6 +786,9 @@ from apps.accounts.serializers import LoginSerializer
 
 
 class LoginView(TokenObtainPairView):
+    # Explicit under deny-by-default (DEFAULT_PERMISSION_CLASSES=IsAuthenticated):
+    # obtaining a token must be open. RefreshView inherits simplejwt's AllowAny.
+    permission_classes = [AllowAny]
     serializer_class = LoginSerializer
 
     def post(self, request, *args, **kwargs):
@@ -699,6 +842,7 @@ Append to `tests/test_auth.py`:
 
 ```python
 REFRESH = "/api/v1/auth/refresh"
+ALLOWED_ORIGIN = "http://localhost:5000"  # in CORS_ALLOWED_ORIGINS default
 
 
 def _login(client, username="boss"):
@@ -706,22 +850,44 @@ def _login(client, username="boss"):
     return client.post(LOGIN, {"username": username, "password": "pw-strong-123"}, format="json")
 
 
-def test_refresh_requires_csrf_header():
+def _csrf_headers():
+    # Header presence forces CORS preflight; Origin must be allowlisted.
+    return {"HTTP_X_REFRESH_CSRF": "1", "HTTP_ORIGIN": ALLOWED_ORIGIN}
+
+
+def test_refresh_rejected_without_csrf_header():
     client = APIClient()
     _login(client)
-    # cookie present from login; omit the CSRF header
-    resp = client.post(REFRESH)
+    resp = client.post(REFRESH, HTTP_ORIGIN=ALLOWED_ORIGIN)  # header missing
+    assert resp.status_code == 403
+
+
+def test_refresh_rejected_from_unknown_origin():
+    client = APIClient()
+    _login(client)
+    resp = client.post(REFRESH, HTTP_X_REFRESH_CSRF="1", HTTP_ORIGIN="https://evil.test")
     assert resp.status_code == 403
 
 
 def test_refresh_rotates_and_returns_new_access():
     client = APIClient()
     _login(client)
-    csrf = client.cookies["refresh_csrf"].value
-    resp = client.post(REFRESH, **{"HTTP_X_REFRESH_CSRF": csrf})
+    resp = client.post(REFRESH, **_csrf_headers())
     assert resp.status_code == 200
     assert "access" in resp.data
     assert "refresh_token" in resp.cookies  # rotated
+
+
+def test_old_refresh_rejected_after_rotation():
+    client = APIClient()
+    _login(client)
+    old_refresh = client.cookies["refresh_token"].value
+    assert client.post(REFRESH, **_csrf_headers()).status_code == 200  # rotates
+    # Replay the OLD token — blacklist-after-rotation must reject it (review fix #6).
+    replay = APIClient()
+    replay.cookies["refresh_token"] = old_refresh
+    resp = replay.post(REFRESH, **_csrf_headers())
+    assert resp.status_code == 401
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -731,26 +897,41 @@ Expected: FAIL (404).
 
 - [ ] **Step 3: Implement the refresh view**
 
-Append to `apps/accounts/views.py`:
+Append to `apps/accounts/views.py` (merge the new imports with the ones already at the
+top of the file from Task 6):
 
 ```python
 from django.conf import settings
-from rest_framework.exceptions import PermissionDenied
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from apps.accounts.auth_cookies import clear_refresh_cookies
+from apps.accounts.auth_cookies import assert_csrf, clear_refresh_cookies
+from apps.accounts.models import User
+
+
+def _refresh_user_is_active(token_str):
+    """Return False if the refresh token's user is suspended/restricted/inactive."""
+    try:
+        token = RefreshToken(token_str)
+    except TokenError:
+        return True  # invalid token: let the serializer reject it as 401, not 403
+    user = User.objects.filter(pk=token.get("user_id")).first()
+    return bool(
+        user and user.is_active and user.access_status == User.AccessStatus.ACTIVE
+    )
 
 
 class RefreshView(TokenRefreshView):
     def post(self, request, *args, **kwargs):
+        assert_csrf(request)  # header presence + Origin allowlist (CSRF defense)
         cookie = request.COOKIES.get(settings.AUTH_REFRESH_COOKIE)
         if not cookie:
             raise InvalidToken("No refresh cookie.")
-        csrf_cookie = request.COOKIES.get(settings.AUTH_CSRF_COOKIE)
-        csrf_header = request.headers.get(settings.AUTH_CSRF_HEADER)
-        if not csrf_cookie or csrf_cookie != csrf_header:
-            raise PermissionDenied("Missing or invalid CSRF token.")
+        if not _refresh_user_is_active(cookie):  # review fix #5
+            response = Response({"detail": "Account access is restricted."}, status=403)
+            clear_refresh_cookies(response)
+            return response
         serializer = self.get_serializer(data={"refresh": cookie})
         try:
             serializer.is_valid(raise_exception=True)
@@ -802,16 +983,24 @@ LOGOUT = "/api/v1/auth/logout"
 def test_logout_clears_cookie_and_blocks_reuse():
     client = APIClient()
     _login(client)
-    old_csrf = client.cookies["refresh_csrf"].value
-    out = client.post(LOGOUT)
+    old_refresh = client.cookies["refresh_token"].value
+    out = client.post(LOGOUT, **_csrf_headers())
     assert out.status_code == 200
-    # cookie cleared (empty value)
-    assert client.cookies["refresh_token"].value == ""
-    # reusing the (now blacklisted) refresh fails — re-set cookie manually
-    client.cookies["refresh_token"] = _login(APIClient()).cookies  # noqa: not reused below
-```
+    assert client.cookies["refresh_token"].value == ""  # cookie cleared
 
-> Implementation note for the engineer: assert the blacklisted-reuse path by capturing the refresh cookie value before logout, then POSTing to REFRESH with that value + matching csrf and asserting 401. Keep the test deterministic.
+    # The blacklisted refresh token must no longer work (review fix #6).
+    replay = APIClient()
+    replay.cookies["refresh_token"] = old_refresh
+    resp = replay.post(REFRESH, **_csrf_headers())
+    assert resp.status_code == 401
+
+
+def test_logout_rejected_without_csrf_header():
+    client = APIClient()
+    _login(client)
+    resp = client.post(LOGOUT, HTTP_ORIGIN=ALLOWED_ORIGIN)  # header missing
+    assert resp.status_code == 403
+```
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -825,13 +1014,15 @@ Append to `apps/accounts/views.py`:
 ```python
 from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
+
+# RefreshToken, TokenError, assert_csrf, clear_refresh_cookies already imported (Task 7).
 
 
 class LogoutView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [AllowAny]  # cookie-based; protected by assert_csrf below
 
     def post(self, request, *args, **kwargs):
+        assert_csrf(request)  # review fix #8: logout must not be CSRF-able
         cookie = request.COOKIES.get(settings.AUTH_REFRESH_COOKIE)
         if cookie:
             try:
@@ -958,16 +1149,16 @@ export const getAccessToken = () => accessToken;
 
 const V1 = API_URL.replace(/\/api$/, "/api/v1");
 
-function readCsrf(): string {
-  const m = document.cookie.match(/(?:^|; )refresh_csrf=([^;]+)/);
-  return m ? decodeURIComponent(m[1]) : "";
-}
+// CSRF header for cookie endpoints. The VALUE is not a secret — its presence forces a
+// CORS preflight, and the server also checks Origin against its allowlist. Export so
+// logout reuses it.
+export const CSRF_HEADER = { "X-Refresh-CSRF": "1" };
 
 export async function refreshAccess(): Promise<boolean> {
   const resp = await fetch(`${V1}/auth/refresh`, {
     method: "POST",
     credentials: "include",
-    headers: { "X-Refresh-CSRF": readCsrf() },
+    headers: { ...CSRF_HEADER },
   });
   if (!resp.ok) { setAccessToken(null); return false; }
   const data = await resp.json();
@@ -1021,7 +1212,7 @@ git commit -m "feat(auth-fe): bearer fetch wrapper with silent refresh retry"
 
 ```typescript
 import { API_URL } from "../../lib/api";
-import { authFetch, setAccessToken } from "../../lib/authClient";
+import { authFetch, CSRF_HEADER, setAccessToken } from "../../lib/authClient";
 
 const V1 = API_URL.replace(/\/api$/, "/api/v1");
 
@@ -1050,7 +1241,11 @@ export async function fetchMe(): Promise<AuthUser | null> {
 }
 
 export async function logout(): Promise<void> {
-  await fetch(`${V1}/auth/logout`, { method: "POST", credentials: "include" });
+  await fetch(`${V1}/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+    headers: { ...CSRF_HEADER },
+  });
   setAccessToken(null);
 }
 ```
@@ -1236,10 +1431,11 @@ git commit -m "feat(auth-fe): login page + protected /admin route"
 
 ## Task 14: Full backend suite + manual smoke
 
-- [ ] **Step 1:** `docker compose exec backend pytest -q` → all pass.
+- [ ] **Step 1:** `docker compose exec backend pytest -q` → all pass (incl. existing `test_public_inventory.py`).
 - [ ] **Step 2:** `docker compose exec backend python manage.py check` → no issues.
-- [ ] **Step 3:** Manual: create an admin user in Django admin, assign a makerspace membership, `POST /api/v1/auth/login`, confirm access token + refresh cookie, then `GET /api/v1/auth/me` with Bearer → profile with makerspace scope.
-- [ ] **Step 4:** Update `CLAUDE.md` (Project Status + conventions): note `/api/v1/` versioning, the auth endpoints, the RBAC module as the scoping authority, and that ApiClient/HMAC-registry is deferred to Phase 10.
+- [ ] **Step 3 (HMAC regression, review fix #9):** confirm BOTH `GET /api/public/makerspaces/` and `GET /api/v1/public/makerspaces/` behave identically under the current HMAC config (both guarded when HMAC is enabled, both open when not). The existing public-inventory test plus a quick curl to each path is sufficient.
+- [ ] **Step 4:** Manual auth smoke: create an admin user in Django admin, assign a makerspace membership, `POST /api/v1/auth/login`, confirm access token in body + `refresh_token` cookie with a non-empty `Max-Age`, then `GET /api/v1/auth/me` with the Bearer token → profile with makerspace scope. Suspend the user in admin → next `/api/v1/auth/refresh` returns 403.
+- [ ] **Step 5:** Update `CLAUDE.md` (Project Status + conventions): `/api/v1/` versioning + deny-by-default DRF, the auth endpoints + CSRF model, the RBAC module (membership-role authority) as the scoping authority, the dev cookie strategy, and that the ApiClient/HMAC-registry is deferred to Phase 10.
 
 ```bash
 git add CLAUDE.md
