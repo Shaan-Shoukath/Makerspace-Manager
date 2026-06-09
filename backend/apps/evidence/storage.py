@@ -1,0 +1,80 @@
+import uuid
+
+import boto3
+from botocore.client import Config
+from botocore.exceptions import BotoCoreError, ClientError
+from django.conf import settings
+
+
+class StorageUnavailable(Exception):
+    pass
+
+
+def _s3_client(endpoint_url):
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint_url,
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_S3_REGION_NAME,
+        config=Config(
+            signature_version=settings.AWS_S3_SIGNATURE_VERSION,
+            s3={"addressing_style": settings.AWS_S3_ADDRESSING_STYLE},
+        ),
+    )
+
+
+def _client():
+    return _s3_client(settings.AWS_S3_ENDPOINT_URL)
+
+
+def _public_client():
+    return _s3_client(settings.AWS_S3_PUBLIC_ENDPOINT_URL)
+
+
+def evidence_object_key(makerspace_id, evidence_type):
+    return f"evidence/{makerspace_id}/{evidence_type}/{uuid.uuid4().hex}"
+
+
+def presigned_upload(object_key, content_type):
+    try:
+        return _public_client().generate_presigned_post(
+            Bucket=settings.AWS_STORAGE_BUCKET_NAME,
+            Key=object_key,
+            Fields={"Content-Type": content_type},
+            Conditions=[
+                {"Content-Type": content_type},
+                ["content-length-range", 1, settings.EVIDENCE_MAX_BYTES],
+            ],
+            ExpiresIn=settings.EVIDENCE_URL_TTL_SECONDS,
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise StorageUnavailable from exc
+
+
+def presigned_get_url(object_key):
+    try:
+        return _public_client().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.AWS_STORAGE_BUCKET_NAME, "Key": object_key},
+            ExpiresIn=settings.EVIDENCE_URL_TTL_SECONDS,
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise StorageUnavailable from exc
+
+
+def object_exists(object_key):
+    try:
+        _client().head_object(
+            Bucket=settings.AWS_STORAGE_BUCKET_NAME,
+            Key=object_key,
+        )
+    except ClientError as exc:
+        status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        code = exc.response.get("Error", {}).get("Code")
+        if status == 404 or code in {"404", "NoSuchKey", "NotFound"}:
+            return False
+        raise StorageUnavailable from exc
+    except BotoCoreError as exc:
+        raise StorageUnavailable from exc
+    return True

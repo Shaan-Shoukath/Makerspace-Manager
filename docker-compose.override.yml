@@ -1,0 +1,6 @@
+# Dev-only overrides (auto-merged by docker compose). Bind-mounts backend source so
+# host edits run live in the container during Stage-2 implementation.
+services:
+  backend:
+    volumes:
+      - ./backend:/app
