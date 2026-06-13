@@ -48,6 +48,7 @@ export const openApiPaths = [
   "/api/v1/admin/evidence/{id}",
   "/api/v1/admin/frontends/{id}",
   "/api/v1/admin/inventory/{id}",
+  "/api/v1/admin/inventory/{id}/adjust-quantity",
   "/api/v1/admin/makerspace/{makerspace_id}/accepted-requests",
   "/api/v1/admin/makerspace/{makerspace_id}/active-loans",
   "/api/v1/admin/makerspace/{makerspace_id}/analytics/active-loans",

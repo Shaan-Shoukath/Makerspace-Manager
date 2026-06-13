@@ -28,6 +28,11 @@ urlpatterns = [
     ),
     path("inventory/<int:pk>", views.InventoryDetailView.as_view(), name="admin-inventory-detail"),
     path(
+        "inventory/<int:pk>/adjust-quantity",
+        views.InventoryQuantityAdjustmentView.as_view(),
+        name="admin-inventory-adjust-quantity",
+    ),
+    path(
         "makerspace/<int:makerspace_id>/categories",
         views.CategoryListCreateView.as_view(),
         name="admin-categories",

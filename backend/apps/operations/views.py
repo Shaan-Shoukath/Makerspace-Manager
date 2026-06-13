@@ -506,19 +506,24 @@ def _xlsx_response(rows, filename):
 
 
 def _batch_html(batch):
+    import segno
+
     items = []
     for item in batch.items.select_related("qr_code"):
+        svg = segno.make(item.qr_code.payload).svg_inline(scale=5)
         items.append(
-            f'<article class="label"><div class="payload">{escape(item.qr_code.payload)}</div>'
-            f'<strong>{escape(item.label_text)}</strong><small>{escape(item.target_type)} #{item.target_id}</small></article>'
+            f'<article class="label"><div class="qr">{svg}</div>'
+            f'<strong>{escape(item.label_text)}</strong></article>'
         )
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>{escape(batch.title)}</title>
 <style>
-body{{font-family:Arial,sans-serif;margin:24px;color:#111827}}
-.sheet{{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}}
-.label{{border:1px solid #111827;padding:12px;min-height:120px;break-inside:avoid}}
-.payload{{font-family:monospace;font-size:12px;margin-bottom:16px;word-break:break-all}}
-strong,small{{display:block}}
-@media print{{body{{margin:0}}.label{{page-break-inside:avoid}}}}
+@page{{size:A4;margin:10mm}}
+body{{font-family:Arial,sans-serif;margin:0;color:#111827}}
+h1{{font-size:16px;margin:0 0 6mm}}
+.sheet{{box-sizing:border-box;display:grid;grid-template-columns:repeat(4,45mm);grid-auto-rows:55mm;gap:4mm;align-content:start;width:190mm;padding:10mm}}
+.label{{box-sizing:border-box;border:1px solid #d1d5db;padding:4mm;text-align:center;break-inside:avoid;page-break-inside:avoid}}
+.qr svg{{height:32mm;width:32mm}}
+strong{{display:block;margin-top:2mm;font-size:10px;line-height:1.2;word-break:break-word}}
+@media print{{h1{{display:none}}.sheet{{padding:0;width:190mm}}}}
 </style></head><body><h1>{escape(batch.title)}</h1><section class="sheet">{''.join(items)}</section></body></html>"""

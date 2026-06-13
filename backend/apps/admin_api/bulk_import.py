@@ -3,10 +3,11 @@ import io
 import json
 
 from django.db import transaction
+from django.utils.text import slugify
 
 from apps.audit import services as audit
 from apps.boxes.models import Box
-from apps.inventory.models import InventoryProduct, PublicAvailabilityMode, TrackingMode
+from apps.inventory.models import Category, InventoryProduct, PublicAvailabilityMode, TrackingMode
 
 
 REQUIRED_FIELDS = {"name", "total_quantity", "available_quantity"}
@@ -18,6 +19,7 @@ OPTIONAL_FIELDS = {
     "show_public_count",
     "public_availability_mode",
     "storage_location",
+    "category",
     "box_code",
     "reserved_quantity",
     "issued_quantity",
@@ -71,17 +73,24 @@ def preview_import(makerspace, rows, mapping):
     mapping = mapping or _default_mapping(rows)
     mapped = []
     errors = []
+    existing_names = _existing_names(makerspace, rows, mapping)
     for index, row in enumerate(rows, start=2):
         normalized, row_errors = _normalize_row(makerspace, row, mapping)
         if row_errors:
             errors.append({"row": index, "errors": row_errors})
-        mapped.append({"row": index, "data": normalized})
+        action = "error" if row_errors else _row_action(normalized, existing_names)
+        mapped.append({"row": index, "action": action, "data": normalized})
     return {
         "mapping": mapping,
         "valid": not errors,
         "errors": errors,
         "rows": mapped,
-        "summary": {"create": _count_creates(makerspace, mapped), "total": len(mapped)},
+        "summary": {
+            "create": sum(1 for item in mapped if item["action"] == "create"),
+            "update": sum(1 for item in mapped if item["action"] == "update"),
+            "errors": len(errors),
+            "total": len(mapped),
+        },
     }
 
 
@@ -95,6 +104,18 @@ def apply_import(actor, makerspace, rows, mapping):
         for item in preview["rows"]:
             data = item["data"]
             box = data.pop("box", None)
+            category_name = data.pop("category_name", "")
+            if category_name:
+                category, was_category_created = _category_for_name(makerspace, category_name)
+                data["category_id"] = category.id
+                if was_category_created:
+                    audit.record(
+                        actor,
+                        "category.created",
+                        makerspace=makerspace,
+                        target=category,
+                        meta={"source": "bulk_import"},
+                    )
             product, was_created = InventoryProduct.objects.update_or_create(
                 makerspace=makerspace,
                 name=data.pop("name"),
@@ -177,6 +198,11 @@ def _normalize_row(makerspace, row, mapping):
         data["box"] = Box.objects.filter(makerspace=makerspace, code=box_code).first()
         if data["box"] is None:
             errors["box_code"] = "Box code does not exist in this makerspace."
+    category_name = str(data.pop("category", "") or "").strip()
+    if category_name:
+        category = Category.objects.filter(makerspace=makerspace, name__iexact=category_name).first()
+        data["category_name"] = category_name
+        data["category_id"] = category.id if category else None
     return data, errors
 
 
@@ -197,12 +223,34 @@ def _bool_value(value):
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
-def _count_creates(makerspace, mapped):
-    names = [item["data"].get("name") for item in mapped if item["data"].get("name")]
-    existing = set(
+def _existing_names(makerspace, rows, mapping):
+    name_column = mapping.get("name")
+    if not name_column:
+        return set()
+    names = [row.get(name_column) for row in rows if row.get(name_column)]
+    return set(
         InventoryProduct.objects.filter(
             makerspace=makerspace,
             name__in=names,
         ).values_list("name", flat=True)
     )
-    return sum(1 for name in names if name not in existing)
+
+
+def _row_action(normalized, existing_names):
+    name = normalized.get("name")
+    if not name:
+        return "error"
+    return "update" if name in existing_names else "create"
+
+
+def _category_for_name(makerspace, name):
+    category = Category.objects.filter(makerspace=makerspace, name__iexact=name).first()
+    if category:
+        return category, False
+    base_slug = slugify(name) or "category"
+    slug = base_slug
+    suffix = 2
+    while Category.objects.filter(makerspace=makerspace, slug=slug).exists():
+        slug = f"{base_slug}-{suffix}"
+        suffix += 1
+    return Category.objects.create(makerspace=makerspace, name=name, slug=slug), True

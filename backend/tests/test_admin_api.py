@@ -4,8 +4,9 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from apps.accounts.models import User
 from apps.apiclients.models import ApiClient
 from apps.audit.models import AuditLog
-from apps.inventory.models import InventoryProduct
+from apps.inventory.models import Category, InventoryProduct
 from apps.makerspaces.models import MakerspaceMembership
+from apps.operations.models import InventoryAdjustment
 from tests.return_helpers import (
     authenticated_client,
     make_box,
@@ -138,6 +139,38 @@ def test_admin_bulk_import_preview_and_apply_are_makerspace_scoped():
     assert product.available_quantity == 3
 
 
+def test_bulk_import_apply_creates_missing_category_by_name():
+    makerspace = make_space("bulk-category")
+    admin = make_member("bulk-category-admin", makerspace)
+
+    response = authenticated_client(admin).post(
+        f"/api/v1/admin/makerspace/{makerspace.id}/inventory/import/apply",
+        {
+            "rows": [
+                {
+                    "Name": "Bench Supply",
+                    "Total": "2",
+                    "Available": "2",
+                    "Category": "Electronics",
+                }
+            ],
+            "mapping": {
+                "name": "Name",
+                "total_quantity": "Total",
+                "available_quantity": "Available",
+                "category": "Category",
+            },
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    category = Category.objects.get(makerspace=makerspace, name="Electronics")
+    product = InventoryProduct.objects.get(makerspace=makerspace, name="Bench Supply")
+    assert product.category_id == category.id
+    assert AuditLog.objects.filter(action="category.created", target_id=str(category.id)).exists()
+
+
 def test_bulk_import_rejects_bad_quantity_buckets():
     makerspace = make_space("bulk-bad")
     admin = make_member("bulk-bad-admin", makerspace)
@@ -187,6 +220,102 @@ def test_bulk_import_accepts_xlsx_upload():
         name="Calipers",
         total_quantity=2,
     ).exists()
+
+
+def test_inventory_create_api_writes_product_and_audit():
+    makerspace = make_space("inventory-create")
+    admin = make_member("inventory-create-admin", makerspace)
+
+    response = authenticated_client(admin).post(
+        f"/api/v1/admin/makerspace/{makerspace.id}/inventory",
+        {
+            "name": "Logic Analyzer",
+            "tracking_mode": "quantity",
+            "total_quantity": 4,
+            "available_quantity": 4,
+            "description": "USB analyzer",
+            "storage_location": "Cabinet A",
+            "is_public": True,
+            "public_self_checkout_enabled": False,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    product = InventoryProduct.objects.get(makerspace=makerspace, name="Logic Analyzer")
+    assert product.storage_location == "Cabinet A"
+    assert AuditLog.objects.filter(action="inventory.created", target_id=str(product.id)).exists()
+
+
+def test_inventory_quantity_adjustment_updates_buckets_and_audit():
+    makerspace = make_space("inventory-adjust")
+    manager = make_member(
+        "inventory-adjust-manager",
+        makerspace,
+        membership_role=MakerspaceMembership.Role.INVENTORY_MANAGER,
+        role=User.Role.REQUESTER,
+    )
+    product = make_product(makerspace, name="Wire", available_quantity=5, damaged_quantity=1)
+
+    response = authenticated_client(manager).post(
+        f"/api/v1/admin/inventory/{product.id}/adjust-quantity",
+        {
+            "delta_available": -2,
+            "delta_damaged": 2,
+            "delta_lost": 0,
+            "reason": "Found damaged during count.",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    product.refresh_from_db()
+    assert product.available_quantity == 3
+    assert product.damaged_quantity == 3
+    assert product.total_quantity == 6
+    assert InventoryAdjustment.objects.filter(product=product, delta_available=-2).exists()
+    assert AuditLog.objects.filter(action="inventory.quantity_adjusted", target_id=str(product.id)).exists()
+
+
+def test_inventory_quantity_adjustment_requires_edit_inventory_in_tenant():
+    makerspace = make_space("inventory-adjust-rbac")
+    guest = make_member(
+        "inventory-adjust-guest",
+        makerspace,
+        membership_role=MakerspaceMembership.Role.GUEST_ADMIN,
+        role=User.Role.GUEST_ADMIN,
+    )
+    product = make_product(makerspace, name="Blocked Wire")
+
+    response = authenticated_client(guest).post(
+        f"/api/v1/admin/inventory/{product.id}/adjust-quantity",
+        {"delta_available": 1, "reason": "No permission."},
+        format="json",
+    )
+
+    assert response.status_code == 403
+    product.refresh_from_db()
+    assert product.available_quantity == 10
+
+
+def test_inventory_quantity_adjustment_hides_cross_tenant_product_before_permission():
+    own_space = make_space("inventory-adjust-own")
+    other_space = make_space("inventory-adjust-other")
+    guest = make_member(
+        "inventory-adjust-cross-guest",
+        own_space,
+        membership_role=MakerspaceMembership.Role.GUEST_ADMIN,
+        role=User.Role.GUEST_ADMIN,
+    )
+    other_product = make_product(other_space, name="Other Wire")
+
+    response = authenticated_client(guest).post(
+        f"/api/v1/admin/inventory/{other_product.id}/adjust-quantity",
+        {"delta_available": 1, "reason": "No scope."},
+        format="json",
+    )
+
+    assert response.status_code == 404
 
 
 def test_admin_can_create_and_list_makerspace_api_clients():

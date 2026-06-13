@@ -2,7 +2,7 @@ import pytest
 
 from apps.accounts.models import User
 from apps.boxes.models import Box, QrCode
-from apps.inventory.models import TrackingMode
+from apps.inventory.models import InventoryAsset, TrackingMode
 from apps.operations.models import QrPrintBatch, StockTransfer, StocktakeSession
 from tests.return_helpers import authenticated_client, make_box, make_member, make_product, make_space, make_user
 
@@ -114,3 +114,101 @@ def test_asset_generation_creates_qr_labels_in_print_batch():
     assert len(response.data["assets"]) == 2
     assert QrCode.objects.filter(target_type=QrCode.TargetType.ASSET).count() == 2
     assert QrPrintBatch.objects.get(pk=response.data["print_batch_id"]).items.count() == 2
+
+
+def test_asset_generation_adds_50_unique_sequential_unit_qrs_to_existing_batch():
+    makerspace = make_space("ops-assets-50")
+    manager = make_member("ops-assets-50-manager", makerspace)
+    product = make_product(makerspace, name="Arduino", tracking_mode=TrackingMode.INDIVIDUAL)
+    batch = QrPrintBatch.objects.create(makerspace=makerspace, title="Arduino labels", created_by=manager)
+
+    response = authenticated_client(manager).post(
+        f"/api/v1/admin/products/{product.id}/assets/generate",
+        {"count": 50, "name_prefix": "Arduino", "print_batch_id": batch.id},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert len(response.data["assets"]) == 50
+    assert InventoryAsset.objects.filter(product=product).count() == 50
+    assert QrCode.objects.filter(target_type=QrCode.TargetType.ASSET).count() == 50
+    assert QrCode.objects.filter(target_type=QrCode.TargetType.ASSET).values("payload").distinct().count() == 50
+    assert list(batch.items.order_by("sort_order").values_list("label_text", flat=True)) == [
+        f"Arduino {number}" for number in range(1, 51)
+    ]
+
+
+def test_qr_batch_accepts_box_and_product_items_and_prints_name_captions():
+    makerspace = make_space("ops-qr-batch")
+    manager = make_member("ops-qr-batch-manager", makerspace)
+    box = make_box(makerspace, "Soldering Bin")
+    product = make_product(makerspace, name="Multimeter")
+    box_qr = QrCode.objects.create(
+        makerspace=makerspace,
+        payload=box.code,
+        target_type=QrCode.TargetType.BOX,
+        target_id=box.id,
+        created_by=manager,
+    )
+    product_qr = QrCode.objects.create(
+        makerspace=makerspace,
+        target_type=QrCode.TargetType.PRODUCT,
+        target_id=product.id,
+        created_by=manager,
+    )
+    client = authenticated_client(manager)
+    batch_response = client.post(
+        f"/api/v1/admin/makerspace/{makerspace.id}/qr-print-batches",
+        {"title": "Bench labels"},
+        format="json",
+    )
+    batch_id = batch_response.data["id"]
+
+    box_item = client.post(
+        f"/api/v1/admin/qr-print-batches/{batch_id}/items",
+        {"qr_code_id": box_qr.id, "label_text": box.label},
+        format="json",
+    )
+    product_item = client.post(
+        f"/api/v1/admin/qr-print-batches/{batch_id}/items",
+        {"qr_code_id": product_qr.id, "label_text": product.name},
+        format="json",
+    )
+    printed = client.get(f"/api/v1/admin/qr-print-batches/{batch_id}/print")
+
+    assert batch_response.status_code == 201
+    assert box_item.status_code == 201
+    assert product_item.status_code == 201
+    assert b"Soldering Bin" in printed.content
+    assert b"Multimeter" in printed.content
+    assert b"<svg" in printed.content
+    assert b"grid-template-columns:repeat(4,45mm)" in printed.content
+
+
+def test_qr_batch_items_enforce_manage_qr_rbac_and_makerspace_scope():
+    space_a = make_space("ops-qr-scope-a")
+    space_b = make_space("ops-qr-scope-b")
+    manager_a = make_member("ops-qr-scope-manager-a", space_a)
+    guest_a = make_member("ops-qr-scope-guest-a", space_a, membership_role="guest_admin", role="guest_admin")
+    box_b = make_box(space_b, "Foreign Bin")
+    qr_b = QrCode.objects.create(
+        makerspace=space_b,
+        payload=box_b.code,
+        target_type=QrCode.TargetType.BOX,
+        target_id=box_b.id,
+    )
+    batch_b = QrPrintBatch.objects.create(makerspace=space_b, title="Foreign labels")
+
+    denied_role = authenticated_client(guest_a).post(
+        f"/api/v1/admin/makerspace/{space_a.id}/qr-print-batches",
+        {"title": "Denied"},
+        format="json",
+    )
+    denied_scope = authenticated_client(manager_a).post(
+        f"/api/v1/admin/qr-print-batches/{batch_b.id}/items",
+        {"qr_code_id": qr_b.id},
+        format="json",
+    )
+
+    assert denied_role.status_code == 403
+    assert denied_scope.status_code == 404

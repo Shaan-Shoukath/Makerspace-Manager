@@ -5,6 +5,8 @@ from apps.inventory.models import InventoryAsset, InventoryProduct
 
 
 class BoxSerializer(serializers.ModelSerializer):
+    qr_code_id = serializers.SerializerMethodField()
+
     class Meta:
         model = Box
         fields = [
@@ -16,10 +18,27 @@ class BoxSerializer(serializers.ModelSerializer):
             "location",
             "description",
             "is_active",
+            "qr_code_id",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "code", "created_at", "updated_at"]
+
+    def get_qr_code_id(self, obj) -> int | None:
+        # Every box gets an active BOX QrCode at creation. Surfacing its id lets
+        # QR-management flows (e.g. adding a box to a print batch) reference the
+        # code directly instead of going through the scanner-gated resolve view.
+        qr = (
+            QrCode.objects.filter(
+                makerspace_id=obj.makerspace_id,
+                target_type=QrCode.TargetType.BOX,
+                target_id=obj.id,
+                status=QrCode.Status.ACTIVE,
+            )
+            .order_by("id")
+            .first()
+        )
+        return qr.id if qr else None
 
 
 class QrCodeSerializer(serializers.ModelSerializer):

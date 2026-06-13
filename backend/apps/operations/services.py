@@ -236,7 +236,7 @@ def generate_assets_with_qr(actor, product, data):
                 defaults={"created_by": actor},
             )
             if batch:
-                add_qr_to_batch(batch, qr, label_text=f"{product.name} - {asset.asset_tag}")
+                add_qr_to_batch(batch, qr, label_text=f"{name_prefix} {next_number}")
             created.append({"asset": asset, "qr": qr})
         audit.record(actor, "asset_units.generated", makerspace=product.makerspace, target=product, meta={"count": data["count"]})
     return created, batch

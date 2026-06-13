@@ -3,9 +3,20 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { staffRequest } from "../../../lib/api";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { Panel, type Makerspace, useStaffGet } from "./shared";
+import {
+  AssignIssueModal,
+  RejectRequestModal,
+  ReturnDueModal,
+  ReturnRequestModal,
+  type AssignIssueValues,
+  type RejectRequestValues,
+  type ReturnDueValues,
+  type ReturnRequestValues,
+} from "./QueuesModals";
 
-type RequestItem = {
+export type RequestItem = {
   id: number;
   product_id: number;
   product_name: string;
@@ -15,7 +26,7 @@ type RequestItem = {
   damaged_quantity: number;
   missing_quantity: number;
 };
-type HardwareRequest = {
+export type HardwareRequest = {
   id: number;
   status: string;
   requester_username: string;
@@ -28,6 +39,12 @@ type HardwareRequest = {
 
 export function Queues({ makerspace, guestOnly }: { makerspace: Makerspace; guestOnly: boolean }) {
   const queryClient = useQueryClient();
+  const [acceptRow, setAcceptRow] = useState<HardwareRequest | null>(null);
+  const [dueRow, setDueRow] = useState<HardwareRequest | null>(null);
+  const [rejectRow, setRejectRow] = useState<HardwareRequest | null>(null);
+  const [assignIssueRow, setAssignIssueRow] = useState<HardwareRequest | null>(null);
+  const [returnRow, setReturnRow] = useState<HardwareRequest | null>(null);
+  const [modalError, setModalError] = useState("");
   const policy = useStaffGet<{ id: number; default_loan_days: number }>(
     ["return-policy", makerspace.id],
     `/admin/makerspace/${makerspace.id}/return-policy`,
@@ -65,15 +82,63 @@ export function Queues({ makerspace, guestOnly }: { makerspace: Makerspace; gues
       setDefaultLoanDays(String(policy.data.default_loan_days));
     }
   }, [policy.data]);
-  const setDue = (row: HardwareRequest) => {
-    const value = prompt(
-      "Return due date/time",
-      row.return_due_at ? localDateTimeValue(row.return_due_at) : localDateTimeValue(defaultDueDate(Number(defaultLoanDays) || 7).toISOString()),
-    );
-    if (value === null) return;
-    action.mutate({
-      path: `/admin/requests/${row.id}/return-due`,
-      body: { return_due_at: value ? new Date(value).toISOString() : null },
+
+  const openModal = (setter: (row: HardwareRequest | null) => void, row: HardwareRequest) => {
+    setModalError("");
+    setter(row);
+  };
+  const closeModals = () => {
+    if (action.isPending) return;
+    setAcceptRow(null);
+    setDueRow(null);
+    setRejectRow(null);
+    setAssignIssueRow(null);
+    setReturnRow(null);
+    setModalError("");
+  };
+  const runAction = async (path: string, body?: object, onDone = closeModals) => {
+    setModalError("");
+    try {
+      await action.mutateAsync({ path, body });
+      onDone();
+    } catch (error) {
+      setModalError(error instanceof Error ? error.message : "Action failed.");
+    }
+  };
+  const submitReturnDue = (values: ReturnDueValues) => {
+    if (!dueRow) return;
+    void runAction(`/admin/requests/${dueRow.id}/return-due`, {
+      return_due_at: values.returnDueAt ? new Date(values.returnDueAt).toISOString() : null,
+    });
+  };
+  const submitReject = (values: RejectRequestValues) => {
+    if (!rejectRow) return;
+    void runAction(`/admin/requests/${rejectRow.id}/reject`, { reason: values.reason });
+  };
+  const submitAssignIssue = async (values: AssignIssueValues) => {
+    if (!assignIssueRow) return;
+    setModalError("");
+    try {
+      await action.mutateAsync({
+        path: `/admin/requests/${assignIssueRow.id}/assign-box`,
+        body: { box_code: values.boxCode },
+      });
+      await action.mutateAsync({
+        path: `/admin/requests/${assignIssueRow.id}/issue`,
+        body: { evidence_id: values.evidenceId, remark: values.remark },
+      });
+      closeModals();
+    } catch (error) {
+      setModalError(error instanceof Error ? error.message : "Action failed.");
+    }
+  };
+  const submitReturn = (values: ReturnRequestValues) => {
+    if (!returnRow) return;
+    void runAction(`/admin/requests/${returnRow.id}/return`, {
+      evidence_id: values.evidenceId,
+      box_code: values.boxCode,
+      remark: values.remark,
+      resolutions: values.resolutions,
     });
   };
   return (
@@ -103,9 +168,9 @@ export function Queues({ makerspace, guestOnly }: { makerspace: Makerspace; gues
             rows={pending.data?.results ?? []}
             actions={(row) => (
               <>
-                <button onClick={() => action.mutate({ path: `/admin/requests/${row.id}/accept` })}>Accept</button>
-                <button onClick={() => action.mutate({ path: `/admin/requests/${row.id}/reject`, body: { reason: "Rejected in admin app." } })}>Reject</button>
-                <button onClick={() => setDue(row)}>Set due</button>
+                <button disabled={action.isPending} onClick={() => openModal(setAcceptRow, row)}>Accept</button>
+                <button disabled={action.isPending} onClick={() => openModal(setRejectRow, row)}>Reject</button>
+                <button disabled={action.isPending} onClick={() => openModal(setDueRow, row)}>Set due</button>
               </>
             )}
           />
@@ -116,9 +181,8 @@ export function Queues({ makerspace, guestOnly }: { makerspace: Makerspace; gues
           rows={accepted.data?.results ?? []}
           actions={(row) => (
             <>
-              <button onClick={() => action.mutate({ path: `/admin/requests/${row.id}/assign-box`, body: { box_code: prompt("Box QR code") ?? "" } })}>Assign box</button>
-              <button onClick={() => action.mutate({ path: `/admin/requests/${row.id}/issue`, body: { evidence_id: Number(prompt("Issue evidence id")), remark: "Issued from staff app." } })}>Issue</button>
-              <button onClick={() => setDue(row)}>Set due</button>
+              <button disabled={action.isPending} onClick={() => openModal(setAssignIssueRow, row)}>Assign + issue</button>
+              <button disabled={action.isPending} onClick={() => openModal(setDueRow, row)}>Set due</button>
             </>
           )}
         />
@@ -129,29 +193,59 @@ export function Queues({ makerspace, guestOnly }: { makerspace: Makerspace; gues
             rows={active.data?.results ?? []}
             actions={(row) => (
               <>
-                <button onClick={() => setDue(row)}>Set due</button>
-                <button onClick={() => action.mutate({ path: `/admin/requests/${row.id}/return`, body: returnPayload(row) })}>Return</button>
+                <button disabled={action.isPending} onClick={() => openModal(setDueRow, row)}>Set due</button>
+                <button disabled={action.isPending} onClick={() => openModal(setReturnRow, row)}>Return</button>
               </>
             )}
           />
         </Panel>
       ) : null}
+      <ConfirmDialog
+        open={Boolean(acceptRow)}
+        title="Accept request"
+        message={acceptRow ? `Accept request #${acceptRow.id} from ${acceptRow.requester_username}?${modalError ? ` Error: ${modalError}` : ""}` : ""}
+        confirmLabel="Accept"
+        pending={action.isPending}
+        onCancel={closeModals}
+        onConfirm={() => {
+          if (acceptRow) void runAction(`/admin/requests/${acceptRow.id}/accept`);
+        }}
+      />
+      <ReturnDueModal
+        row={dueRow}
+        defaultValue={dueRow?.return_due_at ? localDateTimeValue(dueRow.return_due_at) : localDateTimeValue(defaultDueDate(Number(defaultLoanDays) || 7).toISOString())}
+        open={Boolean(dueRow)}
+        pending={action.isPending}
+        error={modalError}
+        onClose={closeModals}
+        onSubmit={submitReturnDue}
+      />
+      <RejectRequestModal
+        row={rejectRow}
+        open={Boolean(rejectRow)}
+        pending={action.isPending}
+        error={modalError}
+        onClose={closeModals}
+        onSubmit={submitReject}
+      />
+      <AssignIssueModal
+        row={assignIssueRow}
+        open={Boolean(assignIssueRow)}
+        pending={action.isPending}
+        error={modalError}
+        onClose={closeModals}
+        onSubmit={submitAssignIssue}
+      />
+      <ReturnRequestModal
+        row={returnRow}
+        open={Boolean(returnRow)}
+        pending={action.isPending}
+        error={modalError}
+        onClose={closeModals}
+        onSubmit={submitReturn}
+      />
     </div>
   );
-}
-
-function returnPayload(row: HardwareRequest) {
-  return {
-    evidence_id: Number(prompt("Return evidence id")),
-    box_code: prompt("Returned box QR code") ?? row.assigned_box?.code ?? "",
-    remark: prompt("Return remark") ?? "",
-    resolutions: row.items.map((item) => ({
-      item_id: item.id,
-      returned: item.issued_quantity - item.returned_quantity - item.damaged_quantity - item.missing_quantity,
-      damaged: 0,
-      missing: 0,
-    })),
-  };
 }
 
 function RequestList({ rows, actions }: { rows: HardwareRequest[]; actions: (row: HardwareRequest) => React.ReactNode }) {

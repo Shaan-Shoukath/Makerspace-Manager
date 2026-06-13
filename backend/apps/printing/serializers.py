@@ -95,6 +95,18 @@ class PrintPrinterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"makerspace": "Unknown makerspace."})
         return attrs
 
+    def create(self, validated_data):
+        makerspace_id = validated_data.pop("makerspace_id")
+        return PrintPrinter.objects.create(
+            makerspace_id=makerspace_id,
+            **validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        if "makerspace_id" in validated_data:
+            instance.makerspace_id = validated_data.pop("makerspace_id")
+        return super().update(instance, validated_data)
+
     def get_active_spool(self, obj) -> dict | None:
         spool = (
             obj.filament_spools.filter(is_active=True)
@@ -172,20 +184,42 @@ class FilamentSpoolSerializer(serializers.ModelSerializer):
         makerspace_id = attrs.get("makerspace_id") or getattr(
             self.instance, "makerspace_id", None
         )
-        printer = attrs.get("printer") or getattr(self.instance, "printer", None)
+        printer = attrs["printer"] if "printer" in attrs else getattr(
+            self.instance, "printer", None
+        )
         if not makerspace_id:
             raise serializers.ValidationError({"makerspace": "This field is required."})
+        if not Makerspace.objects.filter(pk=makerspace_id).exists():
+            raise serializers.ValidationError({"makerspace": "Unknown makerspace."})
         if printer and printer.makerspace_id != makerspace_id:
             raise serializers.ValidationError(
                 {"printer": "Printer must belong to the same makerspace."}
             )
-        remaining = attrs.get("remaining_weight_grams")
-        initial = attrs.get("initial_weight_grams")
+        remaining = attrs.get(
+            "remaining_weight_grams",
+            getattr(self.instance, "remaining_weight_grams", None),
+        )
+        initial = attrs.get(
+            "initial_weight_grams",
+            getattr(self.instance, "initial_weight_grams", None),
+        )
         if initial is not None and remaining is not None and remaining > initial:
             raise serializers.ValidationError(
                 {"remaining_weight_grams": "Remaining weight cannot exceed initial weight."}
             )
         return attrs
+
+    def create(self, validated_data):
+        makerspace_id = validated_data.pop("makerspace_id")
+        return FilamentSpool.objects.create(
+            makerspace_id=makerspace_id,
+            **validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        if "makerspace_id" in validated_data:
+            instance.makerspace_id = validated_data.pop("makerspace_id")
+        return super().update(instance, validated_data)
 
 
 class PrintRequestCreateSerializer(serializers.ModelSerializer):

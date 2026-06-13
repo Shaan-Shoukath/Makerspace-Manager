@@ -1090,6 +1090,62 @@
                 }
             }
         },
+        "/api/v1/admin/inventory/{id}/adjust-quantity": {
+            "post": {
+                "operationId": "api_v1_admin_inventory_adjust_quantity_create",
+                "summary": "Adjust inventory quantity buckets",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Admin inventory"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/InventoryQuantityAdjustment"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/InventoryQuantityAdjustment"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/InventoryQuantityAdjustment"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InventoryProductAdmin"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/v1/admin/makerspace/{makerspace_id}/accepted-requests": {
             "get": {
                 "operationId": "api_v1_admin_makerspace_accepted_requests_list",
@@ -8104,6 +8160,11 @@
                     "is_active": {
                         "type": "boolean"
                     },
+                    "qr_code_id": {
+                        "type": "integer",
+                        "nullable": true,
+                        "readOnly": true
+                    },
                     "created_at": {
                         "type": "string",
                         "format": "date-time",
@@ -8121,6 +8182,7 @@
                     "id",
                     "label",
                     "makerspace",
+                    "qr_code_id",
                     "updated_at"
                 ]
             },
@@ -8885,6 +8947,29 @@
                     "makerspace",
                     "name",
                     "updated_at"
+                ]
+            },
+            "InventoryQuantityAdjustment": {
+                "type": "object",
+                "properties": {
+                    "delta_available": {
+                        "type": "integer",
+                        "default": 0
+                    },
+                    "delta_damaged": {
+                        "type": "integer",
+                        "default": 0
+                    },
+                    "delta_lost": {
+                        "type": "integer",
+                        "default": 0
+                    },
+                    "reason": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reason"
                 ]
             },
             "IssueRequest": {
@@ -9706,6 +9791,11 @@
                     },
                     "is_active": {
                         "type": "boolean"
+                    },
+                    "qr_code_id": {
+                        "type": "integer",
+                        "nullable": true,
+                        "readOnly": true
                     },
                     "created_at": {
                         "type": "string",

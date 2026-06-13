@@ -299,6 +299,23 @@ class BulkImportPreviewSerializer(serializers.Serializer):
         return attrs
 
 
+class InventoryQuantityAdjustmentSerializer(serializers.Serializer):
+    delta_available = serializers.IntegerField(default=0)
+    delta_damaged = serializers.IntegerField(default=0)
+    delta_lost = serializers.IntegerField(default=0)
+    reason = serializers.CharField(allow_blank=False, trim_whitespace=True)
+
+    def validate(self, attrs):
+        deltas = [
+            attrs.get("delta_available", 0),
+            attrs.get("delta_damaged", 0),
+            attrs.get("delta_lost", 0),
+        ]
+        if not any(deltas):
+            raise serializers.ValidationError("At least one quantity delta is required.")
+        return attrs
+
+
 class AuditLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = AuditLog

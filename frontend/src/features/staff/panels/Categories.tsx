@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { DataTable, EmptyState } from "../../../components/ui";
+import { ConfirmDialog, DataTable, EmptyState } from "../../../components/ui";
 import type { DataTableColumn } from "../../../components/ui";
 import { staffRequest } from "../../../lib/api";
 import { categoryResults, Panel, type Category, type CategoryListResponse, type Makerspace, useStaffGet } from "./shared";
@@ -34,6 +34,7 @@ export function Categories({ makerspace }: { makerspace: Makerspace }) {
   const [form, setForm] = useState<CategoryForm>(emptyCategoryForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<CategoryForm>(emptyCategoryForm);
+  const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
   const categories = useStaffGet<CategoryListResponse>(
     ["categories", makerspace.id],
     `/admin/makerspace/${makerspace.id}/categories`,
@@ -72,7 +73,10 @@ export function Categories({ makerspace }: { makerspace: Makerspace }) {
         if (error instanceof SyntaxError) return undefined;
         throw error;
       }),
-    onSuccess: invalidateCategories,
+    onSuccess: () => {
+      setDeleteTarget(null);
+      invalidateCategories();
+    },
   });
   const rows = categoryResults(categories.data);
   const startEdit = (category: Category) => {
@@ -159,11 +163,7 @@ export function Categories({ makerspace }: { makerspace: Makerspace }) {
               className="desk-button"
               type="button"
               disabled={remove.isPending}
-              onClick={() => {
-                if (confirm(`Delete ${category.name}? This will detach ${category.product_count} products.`)) {
-                  remove.mutate(category);
-                }
-              }}
+              onClick={() => setDeleteTarget(category)}
             >
               Delete
             </button>
@@ -221,6 +221,22 @@ export function Categories({ makerspace }: { makerspace: Makerspace }) {
           />
         )}
       </div>
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete category"
+        message={
+          deleteTarget
+            ? `Delete ${deleteTarget.name}? This will detach ${deleteTarget.product_count} products.`
+            : ""
+        }
+        confirmLabel="Delete"
+        tone="danger"
+        pending={remove.isPending}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) remove.mutate(deleteTarget);
+        }}
+      />
     </Panel>
   );
 }
