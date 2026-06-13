@@ -12,6 +12,7 @@ def user_payload(user):
         "email": user.email,
         "role": user.role,
         "is_superuser": user.is_superuser,
+        "must_change_password": user.must_change_password,
         "makerspaces": [
             {"id": m.makerspace_id, "slug": m.makerspace.slug, "role": m.role}
             for m in user.makerspace_memberships.select_related("makerspace")

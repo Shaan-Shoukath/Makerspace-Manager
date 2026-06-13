@@ -1,5 +1,9 @@
 from django.urls import path
 
+from apps.printing.reports_views import (
+    MakerspacePrintingReportView,
+    SuperadminPrintingReportView,
+)
 from apps.printing.views import (
     ManagedPrintRequestDetailView,
     ManagedPrintRequestListView,
@@ -21,6 +25,16 @@ from apps.printing.views import (
 app_name = "printing"
 
 urlpatterns = [
+    path(
+        "admin/makerspace/<int:makerspace_id>/printing/reports",
+        MakerspacePrintingReportView.as_view(),
+        name="makerspace-report",
+    ),
+    path(
+        "admin/printing/reports",
+        SuperadminPrintingReportView.as_view(),
+        name="admin-report",
+    ),
     path("requests/", PrintRequestCreateListView.as_view(), name="request-list"),
     path("requests/<int:pk>/", PrintRequestDetailView.as_view(), name="request-detail"),
     path("buckets/", PrintBucketListView.as_view(), name="bucket-list"),

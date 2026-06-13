@@ -233,6 +233,55 @@
                 }
             }
         },
+        "/api/v1/admin/analytics/{report_key}": {
+            "get": {
+                "operationId": "api_v1_admin_analytics_retrieve",
+                "summary": "Get aggregate analytics report",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "report_key",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "active-loans",
+                                "damaged-lost",
+                                "damaged-missing",
+                                "most-lent",
+                                "qr-scans",
+                                "recently-added",
+                                "returns",
+                                "summary",
+                                "taken-items",
+                                "top-borrowers"
+                            ]
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Analytics"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/v1/admin/api-clients/{id}": {
             "get": {
                 "operationId": "api_v1_admin_api_clients_retrieve",
@@ -1146,6 +1195,32 @@
                 }
             }
         },
+        "/api/v1/admin/ledger": {
+            "get": {
+                "operationId": "api_v1_admin_ledger_retrieve",
+                "summary": "List outstanding inventory loans across all makerspaces",
+                "tags": [
+                    "Ledger"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LedgerResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/v1/admin/makerspace/{makerspace_id}/accepted-requests": {
             "get": {
                 "operationId": "api_v1_admin_makerspace_accepted_requests_list",
@@ -1313,9 +1388,157 @@
                 }
             }
         },
+        "/api/v1/admin/makerspace/{makerspace_id}/analytics/damaged-lost": {
+            "get": {
+                "operationId": "api_v1_admin_makerspace_analytics_damaged_lost_retrieve",
+                "summary": "Get analytics report",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "makerspace_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Analytics"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/v1/admin/makerspace/{makerspace_id}/analytics/damaged-missing": {
             "get": {
                 "operationId": "api_v1_admin_makerspace_analytics_damaged_missing_retrieve",
+                "summary": "Get analytics report",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "makerspace_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Analytics"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/makerspace/{makerspace_id}/analytics/most-lent": {
+            "get": {
+                "operationId": "api_v1_admin_makerspace_analytics_most_lent_retrieve",
+                "summary": "Get analytics report",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "makerspace_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Analytics"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/makerspace/{makerspace_id}/analytics/qr-scans": {
+            "get": {
+                "operationId": "api_v1_admin_makerspace_analytics_qr_scans_retrieve",
+                "summary": "Get analytics report",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "makerspace_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Analytics"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/makerspace/{makerspace_id}/analytics/recently-added": {
+            "get": {
+                "operationId": "api_v1_admin_makerspace_analytics_recently_added_retrieve",
                 "summary": "Get analytics report",
                 "parameters": [
                     {
@@ -1427,6 +1650,43 @@
         "/api/v1/admin/makerspace/{makerspace_id}/analytics/taken-items": {
             "get": {
                 "operationId": "api_v1_admin_makerspace_analytics_taken_items_retrieve",
+                "summary": "Get analytics report",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "makerspace_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Analytics"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/makerspace/{makerspace_id}/analytics/top-borrowers": {
+            "get": {
+                "operationId": "api_v1_admin_makerspace_analytics_top_borrowers_retrieve",
                 "summary": "Get analytics report",
                 "parameters": [
                     {
@@ -2357,6 +2617,42 @@
                 }
             }
         },
+        "/api/v1/admin/makerspace/{makerspace_id}/ledger": {
+            "get": {
+                "operationId": "api_v1_admin_makerspace_ledger_retrieve",
+                "summary": "List outstanding inventory loans",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "makerspace_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Ledger"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LedgerResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/v1/admin/makerspace/{makerspace_id}/pending-requests": {
             "get": {
                 "operationId": "api_v1_admin_makerspace_pending_requests_list",
@@ -2549,7 +2845,19 @@
                         "in": "path",
                         "name": "report_key",
                         "schema": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": [
+                                "active-loans",
+                                "damaged-lost",
+                                "damaged-missing",
+                                "most-lent",
+                                "qr-scans",
+                                "recently-added",
+                                "returns",
+                                "summary",
+                                "taken-items",
+                                "top-borrowers"
+                            ]
                         },
                         "required": true
                     }
@@ -3635,6 +3943,71 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/QrCode"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/reports/{report_key}/export": {
+            "get": {
+                "operationId": "api_v1_admin_reports_export_retrieve",
+                "summary": "Export aggregate report",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "format",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "csv",
+                                "xlsx"
+                            ]
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "report_key",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "active-loans",
+                                "damaged-lost",
+                                "damaged-missing",
+                                "most-lent",
+                                "qr-scans",
+                                "recently-added",
+                                "returns",
+                                "summary",
+                                "taken-items",
+                                "top-borrowers"
+                            ]
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Reports"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "text/csv": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            },
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
                                 }
                             }
                         },
@@ -4880,6 +5253,58 @@
                 }
             }
         },
+        "/api/v1/auth/change-password": {
+            "post": {
+                "operationId": "api_v1_auth_change_password_create",
+                "summary": "Change current user's password",
+                "tags": [
+                    "Auth"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ChangePassword"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ChangePassword"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ChangePassword"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ChangePasswordResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "description": "Password validation failed."
+                    },
+                    "401": {
+                        "description": "Authentication credentials were not provided."
+                    }
+                }
+            }
+        },
         "/api/v1/auth/login": {
             "post": {
                 "operationId": "api_v1_auth_login_create",
@@ -5353,6 +5778,106 @@
                 "responses": {
                     "200": {
                         "description": "Webhook processed."
+                    }
+                }
+            }
+        },
+        "/api/v1/printing/admin/makerspace/{makerspace_id}/printing/reports": {
+            "get": {
+                "operationId": "api_v1_printing_admin_makerspace_printing_reports_retrieve",
+                "summary": "Retrieve makerspace printing report",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "makerspace_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Printing reports"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PrintingReport"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        },
+                        "description": "Invalid request."
+                    },
+                    "401": {
+                        "description": "Authentication credentials were not provided."
+                    },
+                    "403": {
+                        "description": "Permission denied."
+                    },
+                    "404": {
+                        "description": "Not found."
+                    }
+                }
+            }
+        },
+        "/api/v1/printing/admin/printing/reports": {
+            "get": {
+                "operationId": "api_v1_printing_admin_printing_reports_retrieve",
+                "summary": "Retrieve aggregate printing report",
+                "tags": [
+                    "Printing reports"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PrintingReport"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        },
+                        "description": "Invalid request."
+                    },
+                    "401": {
+                        "description": "Authentication credentials were not provided."
+                    },
+                    "403": {
+                        "description": "Permission denied."
+                    },
+                    "404": {
+                        "description": "Not found."
                     }
                 }
             }
@@ -8111,6 +8636,9 @@
                     "is_superuser": {
                         "type": "boolean"
                     },
+                    "must_change_password": {
+                        "type": "boolean"
+                    },
                     "makerspaces": {
                         "type": "array",
                         "items": {
@@ -8124,6 +8652,7 @@
                     "id",
                     "is_superuser",
                     "makerspaces",
+                    "must_change_password",
                     "role",
                     "username"
                 ]
@@ -8259,6 +8788,34 @@
                     "name",
                     "product_count",
                     "updated_at"
+                ]
+            },
+            "ChangePassword": {
+                "type": "object",
+                "properties": {
+                    "current_password": {
+                        "type": "string",
+                        "writeOnly": true
+                    },
+                    "new_password": {
+                        "type": "string",
+                        "writeOnly": true
+                    }
+                },
+                "required": [
+                    "current_password",
+                    "new_password"
+                ]
+            },
+            "ChangePasswordResponse": {
+                "type": "object",
+                "properties": {
+                    "detail": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "detail"
                 ]
             },
             "CheckinVerifyRequest": {
@@ -8991,6 +9548,71 @@
                 },
                 "required": [
                     "evidence_id"
+                ]
+            },
+            "LedgerResponse": {
+                "type": "object",
+                "properties": {
+                    "count": {
+                        "type": "integer"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/LedgerRow"
+                        }
+                    }
+                },
+                "required": [
+                    "count",
+                    "results"
+                ]
+            },
+            "LedgerRow": {
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "$ref": "#/components/schemas/SourceEnum"
+                    },
+                    "item_name": {
+                        "type": "string"
+                    },
+                    "holder": {
+                        "type": "string"
+                    },
+                    "quantity": {
+                        "type": "integer"
+                    },
+                    "since": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "due": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "makerspace_id": {
+                        "type": "integer"
+                    },
+                    "reference_id": {
+                        "type": "integer"
+                    },
+                    "status": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "due",
+                    "holder",
+                    "item_name",
+                    "makerspace_id",
+                    "quantity",
+                    "reference_id",
+                    "since",
+                    "source",
+                    "status"
                 ]
             },
             "LoginRequest": {
@@ -10619,6 +11241,178 @@
                     }
                 }
             },
+            "PrintingReport": {
+                "type": "object",
+                "properties": {
+                    "totals": {
+                        "$ref": "#/components/schemas/PrintingReportTotals"
+                    },
+                    "printer_hours": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PrintingReportPrinterHours"
+                        }
+                    },
+                    "filament_used": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PrintingReportFilamentUsed"
+                        }
+                    },
+                    "total_grams_used": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "filament_estimated_by_period": {
+                        "$ref": "#/components/schemas/PrintingReportPeriods"
+                    }
+                },
+                "required": [
+                    "filament_estimated_by_period",
+                    "filament_used",
+                    "printer_hours",
+                    "total_grams_used",
+                    "totals"
+                ]
+            },
+            "PrintingReportFilamentUsed": {
+                "type": "object",
+                "properties": {
+                    "spool_id": {
+                        "type": "integer"
+                    },
+                    "material": {
+                        "type": "string"
+                    },
+                    "color": {
+                        "type": "string"
+                    },
+                    "grams_used": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "remaining_grams": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "makerspace_id": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "color",
+                    "grams_used",
+                    "material",
+                    "remaining_grams",
+                    "spool_id"
+                ]
+            },
+            "PrintingReportPeriod": {
+                "type": "object",
+                "properties": {
+                    "period": {
+                        "type": "string"
+                    },
+                    "grams": {
+                        "type": "number",
+                        "format": "double"
+                    }
+                },
+                "required": [
+                    "grams",
+                    "period"
+                ]
+            },
+            "PrintingReportPeriods": {
+                "type": "object",
+                "properties": {
+                    "by_month": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PrintingReportPeriod"
+                        }
+                    },
+                    "by_day": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PrintingReportPeriod"
+                        }
+                    },
+                    "by_hour": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PrintingReportPeriod"
+                        }
+                    }
+                },
+                "required": [
+                    "by_day",
+                    "by_hour",
+                    "by_month"
+                ]
+            },
+            "PrintingReportPrinterHours": {
+                "type": "object",
+                "properties": {
+                    "printer_id": {
+                        "type": "integer"
+                    },
+                    "printer_name": {
+                        "type": "string"
+                    },
+                    "completed_requests": {
+                        "type": "integer"
+                    },
+                    "hours": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "makerspace_id": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "completed_requests",
+                    "hours",
+                    "printer_id",
+                    "printer_name"
+                ]
+            },
+            "PrintingReportTotals": {
+                "type": "object",
+                "properties": {
+                    "total_requests": {
+                        "type": "integer"
+                    },
+                    "completed": {
+                        "type": "integer"
+                    },
+                    "failed": {
+                        "type": "integer"
+                    },
+                    "rejected": {
+                        "type": "integer"
+                    },
+                    "pending": {
+                        "type": "integer"
+                    },
+                    "printing": {
+                        "type": "integer"
+                    },
+                    "accepted": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "accepted",
+                    "completed",
+                    "failed",
+                    "pending",
+                    "printing",
+                    "rejected",
+                    "total_requests"
+                ]
+            },
             "PublicAvailabilityModeEnum": {
                 "enum": [
                     "exact_count",
@@ -11475,6 +12269,14 @@
                     "remark",
                     "resolutions"
                 ]
+            },
+            "SourceEnum": {
+                "enum": [
+                    "request",
+                    "self_checkout"
+                ],
+                "type": "string",
+                "description": "* `request` - request\n* `self_checkout` - self_checkout"
             },
             "StaffMembership": {
                 "type": "object",

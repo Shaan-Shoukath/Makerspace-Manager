@@ -1,7 +1,6 @@
 import csv
 from io import BytesIO, StringIO
 
-from django.db.models import Count, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils.html import escape
@@ -19,10 +18,10 @@ from apps.admin_api.permissions import IsActiveStaff, IsActiveSuperAdmin, requir
 from apps.audit import services as audit
 from apps.boxes.models import Box, QrCode, QrScanEvent
 from apps.boxes.serializers import BoxSerializer, QrCodeSerializer
-from apps.hardware_requests.models import HardwareRequest, HardwareRequestItem
 from apps.inventory.models import InventoryAsset, InventoryProduct
 from apps.makerspaces.models import Makerspace
 from apps.makerspaces.guards import require_module
+from apps.operations import ledger, reports
 from apps.operations import services
 from apps.operations.models import QrPrintBatch, StockTransfer, StocktakeSession
 from apps.operations.serializers import (
@@ -34,6 +33,7 @@ from apps.operations.serializers import (
     EmptySerializer,
     GenericObjectSerializer,
     HealthSerializer,
+    LedgerResponseSerializer,
     QrPrintBatchCreateSerializer,
     QrPrintBatchDetailSerializer,
     QrPrintBatchItemCreateSerializer,
@@ -293,15 +293,66 @@ class StocktakeApplyAdjustmentsView(APIView):
         return Response(StocktakeSerializer(services.apply_stocktake_adjustments(request.user, stocktake)).data)
 
 
+class LedgerView(APIView):
+    permission_classes = [IsActiveStaff]
+    serializer_class = LedgerResponseSerializer
+
+    @extend_schema(
+        tags=["Ledger"],
+        summary="List outstanding inventory loans",
+        request=None,
+        responses={200: LedgerResponseSerializer},
+    )
+    def get(self, request, makerspace_id, *args, **kwargs):
+        makerspace = _makerspace_for_inventory_view(request.user, makerspace_id)
+        require_action(request.user, rbac.Action.VIEW_INVENTORY, makerspace.id)
+        require_module(makerspace, "staff_admin")
+        return Response(_ledger_payload(ledger.ledger_rows(makerspace.id)))
+
+
+class AggregateLedgerView(APIView):
+    permission_classes = [IsActiveStaff]
+    serializer_class = LedgerResponseSerializer
+
+    @extend_schema(
+        tags=["Ledger"],
+        summary="List outstanding inventory loans across all makerspaces",
+        request=None,
+        responses={200: LedgerResponseSerializer},
+    )
+    def get(self, request, *args, **kwargs):
+        _require_superadmin(request.user)
+        return Response(_ledger_payload(ledger.ledger_rows()))
+
+
 class AnalyticsView(APIView):
     permission_classes = [IsActiveStaff]
     serializer_class = GenericObjectSerializer
 
     @extend_schema(tags=["Analytics"], summary="Get analytics report", request=None, responses={200: OpenApiTypes.OBJECT})
     def get(self, request, makerspace_id, report_key="summary", *args, **kwargs):
-        require_action(request.user, rbac.Action.VIEW_INVENTORY, makerspace_id)
-        require_module(makerspace_id, "reports")
-        return Response(report_data(makerspace_id, report_key))
+        makerspace = _makerspace_for_inventory_view(request.user, makerspace_id)
+        require_action(request.user, rbac.Action.VIEW_INVENTORY, makerspace.id)
+        require_module(makerspace, "reports")
+        return Response(reports.report_data(report_key, makerspace.id))
+
+
+class AggregateAnalyticsView(APIView):
+    permission_classes = [IsActiveStaff]
+    serializer_class = GenericObjectSerializer
+
+    @extend_schema(
+        tags=["Analytics"],
+        summary="Get aggregate analytics report",
+        request=None,
+        parameters=[
+            OpenApiParameter("report_key", OpenApiTypes.STR, OpenApiParameter.PATH, enum=reports.REPORT_KEYS),
+        ],
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    def get(self, request, report_key="summary", *args, **kwargs):
+        _require_superadmin(request.user)
+        return Response(reports.report_data(report_key))
 
 
 class ReportExportView(APIView):
@@ -313,7 +364,7 @@ class ReportExportView(APIView):
         summary="Export report",
         request=None,
         parameters=[
-            OpenApiParameter("report_key", OpenApiTypes.STR, OpenApiParameter.PATH),
+            OpenApiParameter("report_key", OpenApiTypes.STR, OpenApiParameter.PATH, enum=reports.REPORT_KEYS),
             OpenApiParameter("format", OpenApiTypes.STR, OpenApiParameter.QUERY, enum=["csv", "xlsx"]),
         ],
         responses={
@@ -322,10 +373,39 @@ class ReportExportView(APIView):
         },
     )
     def get(self, request, makerspace_id, report_key, *args, **kwargs):
-        require_action(request.user, rbac.Action.VIEW_INVENTORY, makerspace_id)
-        require_module(makerspace_id, "reports")
+        makerspace = _makerspace_for_inventory_view(request.user, makerspace_id)
+        require_action(request.user, rbac.Action.VIEW_INVENTORY, makerspace.id)
+        require_module(makerspace, "reports")
         fmt = request.query_params.get("format", "csv")
-        rows = report_rows(makerspace_id, report_key)
+        rows = reports.report_rows(report_key, makerspace.id)
+        if fmt == "xlsx":
+            return _xlsx_response(rows, f"{report_key}.xlsx")
+        if fmt != "csv":
+            raise ValidationError({"format": "Use csv or xlsx."})
+        return _csv_response(rows, f"{report_key}.csv")
+
+
+class AggregateReportExportView(APIView):
+    permission_classes = [IsActiveStaff]
+    serializer_class = EmptySerializer
+
+    @extend_schema(
+        tags=["Reports"],
+        summary="Export aggregate report",
+        request=None,
+        parameters=[
+            OpenApiParameter("report_key", OpenApiTypes.STR, OpenApiParameter.PATH, enum=reports.REPORT_KEYS),
+            OpenApiParameter("format", OpenApiTypes.STR, OpenApiParameter.QUERY, enum=["csv", "xlsx"]),
+        ],
+        responses={
+            (200, "text/csv"): OpenApiTypes.STR,
+            (200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"): OpenApiTypes.BINARY,
+        },
+    )
+    def get(self, request, report_key, *args, **kwargs):
+        _require_superadmin(request.user)
+        fmt = request.query_params.get("format", "csv")
+        rows = reports.report_rows(report_key)
         if fmt == "xlsx":
             return _xlsx_response(rows, f"{report_key}.xlsx")
         if fmt != "csv":
@@ -445,37 +525,26 @@ class AssetQrView(APIView):
 
 
 def report_data(makerspace_id, report_key):
-    if report_key == "summary":
-        return {
-            "products": InventoryProduct.objects.filter(makerspace_id=makerspace_id, is_archived=False).count(),
-            "assets": InventoryAsset.objects.filter(makerspace_id=makerspace_id).count(),
-            "active_loans": HardwareRequest.objects.filter(makerspace_id=makerspace_id, status__in=[HardwareRequest.Status.ISSUED, HardwareRequest.Status.PARTIALLY_RETURNED]).count(),
-            "available_quantity": InventoryProduct.objects.filter(makerspace_id=makerspace_id).aggregate(total=Sum("available_quantity"))["total"] or 0,
-            "issued_quantity": InventoryProduct.objects.filter(makerspace_id=makerspace_id).aggregate(total=Sum("issued_quantity"))["total"] or 0,
-            "damaged_quantity": InventoryProduct.objects.filter(makerspace_id=makerspace_id).aggregate(total=Sum("damaged_quantity"))["total"] or 0,
-            "missing_quantity": InventoryProduct.objects.filter(makerspace_id=makerspace_id).aggregate(total=Sum("lost_quantity"))["total"] or 0,
-        }
-    return {"rows": report_rows(makerspace_id, report_key)}
+    return reports.report_data(report_key, makerspace_id)
 
 
 def report_rows(makerspace_id, report_key):
-    if report_key == "taken-items":
-        qs = HardwareRequestItem.objects.filter(request__makerspace_id=makerspace_id).values("product__name").annotate(quantity=Sum("issued_quantity")).order_by("-quantity")
-        return [["product", "issued_quantity"], *[[row["product__name"], row["quantity"] or 0] for row in qs]]
-    if report_key == "active-loans":
-        qs = HardwareRequest.objects.filter(makerspace_id=makerspace_id, status__in=[HardwareRequest.Status.ISSUED, HardwareRequest.Status.PARTIALLY_RETURNED]).order_by("-issued_at")
-        return [["id", "requester", "status", "issued_at"], *[[r.id, r.requester_username, r.status, r.issued_at] for r in qs]]
-    if report_key == "returns":
-        qs = HardwareRequest.objects.filter(makerspace_id=makerspace_id, status__in=[HardwareRequest.Status.RETURNED, HardwareRequest.Status.CLOSED_WITH_ISSUE]).order_by("-closed_at")
-        return [["id", "requester", "status", "closed_at"], *[[r.id, r.requester_username, r.status, r.closed_at] for r in qs]]
-    if report_key == "damaged-missing":
-        qs = InventoryProduct.objects.filter(makerspace_id=makerspace_id).order_by("name")
-        return [["product", "damaged_quantity", "missing_quantity"], *[[p.name, p.damaged_quantity, p.lost_quantity] for p in qs]]
-    if report_key == "qr-scans":
-        qs = QrScanEvent.objects.filter(makerspace_id=makerspace_id).values("context").annotate(count=Count("id")).order_by("context")
-        return [["context", "count"], *[[row["context"], row["count"]] for row in qs]]
-    data = report_data(makerspace_id, "summary")
-    return [["metric", "value"], *[[key, value] for key, value in data.items()]]
+    return reports.report_rows(report_key, makerspace_id)
+
+
+def _makerspace_for_inventory_view(user, makerspace_id):
+    queryset = rbac.scope_by_action(user, rbac.Action.VIEW_INVENTORY, Makerspace.objects.all(), field="id")
+    return get_object_or_404(queryset, pk=makerspace_id)
+
+
+def _require_superadmin(user):
+    if not (user.is_superuser or user.role == user.Role.SUPERADMIN):
+        raise PermissionDenied()
+
+
+def _ledger_payload(rows):
+    serializer = LedgerResponseSerializer({"count": len(rows), "results": rows})
+    return serializer.data
 
 
 def _stocktake_for_action(user, pk, action):

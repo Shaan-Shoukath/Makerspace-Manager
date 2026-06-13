@@ -1,0 +1,219 @@
+from django.db.models import Count, Sum
+
+from apps.boxes.models import QrScanEvent
+from apps.hardware_requests.models import HardwareRequest, HardwareRequestItem
+from apps.inventory.models import InventoryAsset, InventoryProduct
+
+
+REPORT_KEYS = [
+    "summary",
+    "taken-items",
+    "active-loans",
+    "returns",
+    "damaged-missing",
+    "damaged-lost",
+    "qr-scans",
+    "most-lent",
+    "top-borrowers",
+    "recently-added",
+]
+
+
+def report_data(report_key="summary", makerspace_id=None):
+    if report_key == "summary":
+        return _summary(makerspace_id)
+    return {"rows": report_rows(report_key, makerspace_id)}
+
+
+def report_rows(report_key, makerspace_id=None):
+    aggregate = makerspace_id is None
+    if report_key == "taken-items":
+        return _taken_items(makerspace_id, aggregate)
+    if report_key == "active-loans":
+        return _active_loans(makerspace_id, aggregate)
+    if report_key == "returns":
+        return _returns(makerspace_id, aggregate)
+    if report_key == "damaged-missing":
+        return _damaged_missing(makerspace_id, aggregate)
+    if report_key == "damaged-lost":
+        return _damaged_lost(makerspace_id, aggregate)
+    if report_key == "qr-scans":
+        return _qr_scans(makerspace_id, aggregate)
+    if report_key == "most-lent":
+        return _most_lent(makerspace_id, aggregate)
+    if report_key == "top-borrowers":
+        return _top_borrowers(makerspace_id, aggregate)
+    if report_key == "recently-added":
+        return _recently_added(makerspace_id, aggregate)
+    data = report_data("summary", makerspace_id)
+    return [["metric", "value"], *[[key, value] for key, value in data.items()]]
+
+
+def _summary(makerspace_id):
+    products = InventoryProduct.objects.all()
+    assets = InventoryAsset.objects.all()
+    requests = HardwareRequest.objects.all()
+    if makerspace_id is not None:
+        products = products.filter(makerspace_id=makerspace_id)
+        assets = assets.filter(makerspace_id=makerspace_id)
+        requests = requests.filter(makerspace_id=makerspace_id)
+    return {
+        "products": products.filter(is_archived=False).count(),
+        "assets": assets.count(),
+        "active_loans": requests.filter(
+            status__in=[
+                HardwareRequest.Status.ISSUED,
+                HardwareRequest.Status.PARTIALLY_RETURNED,
+            ]
+        ).count(),
+        "available_quantity": products.aggregate(total=Sum("available_quantity"))["total"] or 0,
+        "issued_quantity": products.aggregate(total=Sum("issued_quantity"))["total"] or 0,
+        "damaged_quantity": products.aggregate(total=Sum("damaged_quantity"))["total"] or 0,
+        "missing_quantity": products.aggregate(total=Sum("lost_quantity"))["total"] or 0,
+    }
+
+
+def _taken_items(makerspace_id, aggregate):
+    values = ["product__name"]
+    header = ["product", "issued_quantity"]
+    if aggregate:
+        values = ["request__makerspace_id", *values]
+        header = ["makerspace_id", *header]
+    qs = _items(makerspace_id).values(*values).annotate(quantity=Sum("issued_quantity")).order_by("-quantity")
+    return [header, *[[_value(row, key) for key in values] + [row["quantity"] or 0] for row in qs]]
+
+
+def _active_loans(makerspace_id, aggregate):
+    values = ["id", "requester_username", "status", "issued_at"]
+    header = ["id", "requester", "status", "issued_at"]
+    if aggregate:
+        values = ["makerspace_id", *values]
+        header = ["makerspace_id", *header]
+    qs = _requests(makerspace_id).filter(
+        status__in=[HardwareRequest.Status.ISSUED, HardwareRequest.Status.PARTIALLY_RETURNED]
+    ).order_by("-issued_at")
+    return [header, *[[_value(request, key) for key in values] for request in qs]]
+
+
+def _returns(makerspace_id, aggregate):
+    values = ["id", "requester_username", "status", "closed_at"]
+    header = ["id", "requester", "status", "closed_at"]
+    if aggregate:
+        values = ["makerspace_id", *values]
+        header = ["makerspace_id", *header]
+    qs = _requests(makerspace_id).filter(
+        status__in=[HardwareRequest.Status.RETURNED, HardwareRequest.Status.CLOSED_WITH_ISSUE]
+    ).order_by("-closed_at")
+    return [header, *[[_value(request, key) for key in values] for request in qs]]
+
+
+def _damaged_missing(makerspace_id, aggregate):
+    values = ["name", "damaged_quantity", "lost_quantity"]
+    header = ["product", "damaged_quantity", "missing_quantity"]
+    return _product_quantity_rows(makerspace_id, aggregate, values, header)
+
+
+def _damaged_lost(makerspace_id, aggregate):
+    values = ["name", "damaged_quantity", "lost_quantity"]
+    header = ["product_name", "damaged_quantity", "lost_quantity"]
+    return _product_quantity_rows(makerspace_id, aggregate, values, header)
+
+
+def _qr_scans(makerspace_id, aggregate):
+    values = ["context"]
+    header = ["context", "count"]
+    if aggregate:
+        values = ["makerspace_id", *values]
+        header = ["makerspace_id", *header]
+    qs = _qr_events(makerspace_id).values(*values).annotate(count=Count("id")).order_by(*values)
+    return [header, *[[_value(row, key) for key in values] + [row["count"]] for row in qs]]
+
+
+def _most_lent(makerspace_id, aggregate):
+    values = ["product__name"]
+    header = ["product_name", "times_lent", "total_quantity_lent"]
+    if aggregate:
+        values = ["request__makerspace_id", *values]
+        header = ["makerspace_id", *header]
+    qs = (
+        _items(makerspace_id)
+        .filter(issued_quantity__gt=0)
+        .values(*values)
+        .annotate(
+            times_lent=Count("request_id", distinct=True),
+            total_quantity_lent=Sum("issued_quantity"),
+        )
+        .order_by("-times_lent", "-total_quantity_lent", "product__name")
+    )
+    return [
+        header,
+        *[
+            [_value(row, key) for key in values]
+            + [row["times_lent"], row["total_quantity_lent"] or 0]
+            for row in qs
+        ],
+    ]
+
+
+def _top_borrowers(makerspace_id, aggregate):
+    values = ["request__requester_username"]
+    header = ["holder", "requests", "items_borrowed"]
+    if aggregate:
+        values = ["request__makerspace_id", *values]
+        header = ["makerspace_id", *header]
+    qs = (
+        _items(makerspace_id)
+        .filter(issued_quantity__gt=0)
+        .values(*values)
+        .annotate(
+            requests=Count("request_id", distinct=True),
+            items_borrowed=Sum("issued_quantity"),
+        )
+        .order_by("-requests", "-items_borrowed", "request__requester_username")
+    )
+    return [
+        header,
+        *[[_value(row, key) for key in values] + [row["requests"], row["items_borrowed"] or 0] for row in qs],
+    ]
+
+
+def _recently_added(makerspace_id, aggregate):
+    values = ["name", "created_at", "total_quantity"]
+    header = ["product_name", "created_at", "total_quantity"]
+    if aggregate:
+        values = ["makerspace_id", *values]
+        header = ["makerspace_id", *header]
+    qs = _products(makerspace_id).order_by("-created_at", "-id")
+    return [header, *[[_value(product, key) for key in values] for product in qs]]
+
+
+def _product_quantity_rows(makerspace_id, aggregate, values, header):
+    if aggregate:
+        values = ["makerspace_id", *values]
+        header = ["makerspace_id", *header]
+    qs = _products(makerspace_id).order_by("name")
+    return [header, *[[_value(product, key) for key in values] for product in qs]]
+
+
+def _products(makerspace_id):
+    qs = InventoryProduct.objects.all()
+    return qs if makerspace_id is None else qs.filter(makerspace_id=makerspace_id)
+
+
+def _items(makerspace_id):
+    qs = HardwareRequestItem.objects.select_related("request", "product")
+    return qs if makerspace_id is None else qs.filter(request__makerspace_id=makerspace_id)
+
+
+def _requests(makerspace_id):
+    qs = HardwareRequest.objects.all()
+    return qs if makerspace_id is None else qs.filter(makerspace_id=makerspace_id)
+
+
+def _qr_events(makerspace_id):
+    qs = QrScanEvent.objects.all()
+    return qs if makerspace_id is None else qs.filter(makerspace_id=makerspace_id)
+
+
+def _value(source, key):
+    return source[key] if isinstance(source, dict) else getattr(source, key)

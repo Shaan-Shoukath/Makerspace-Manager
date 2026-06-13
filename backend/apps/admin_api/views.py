@@ -6,6 +6,7 @@ from django.utils.crypto import get_random_string
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -593,6 +594,10 @@ class RestoreUserAccessView(APIView):
         return Response(UserSerializer(user).data)
 
 
+class AuditLogPagination(PageNumberPagination):
+    page_size = 24
+
+
 @extend_schema(tags=["Admin users"], summary="List audit log entries", parameters=[
     OpenApiParameter("makerspace", int, OpenApiParameter.QUERY), OpenApiParameter("action", str, OpenApiParameter.QUERY),
     OpenApiParameter("target_type", str, OpenApiParameter.QUERY), OpenApiParameter("target_id", str, OpenApiParameter.QUERY),
@@ -600,6 +605,7 @@ class RestoreUserAccessView(APIView):
 class AuditLogListView(generics.ListAPIView):
     serializer_class = AuditLogSerializer
     permission_classes = [IsActiveStaff]
+    pagination_class = AuditLogPagination
 
     def get_queryset(self):
         queryset = AuditLog.objects.select_related("actor", "makerspace").order_by("-created_at")

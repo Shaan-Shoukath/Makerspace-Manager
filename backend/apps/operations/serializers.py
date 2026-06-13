@@ -78,6 +78,23 @@ class ReportRowsSerializer(serializers.Serializer):
     rows = serializers.ListField(child=serializers.ListField(child=serializers.CharField(allow_blank=True, allow_null=True)))
 
 
+class LedgerRowSerializer(serializers.Serializer):
+    source = serializers.ChoiceField(choices=["request", "self_checkout"])
+    item_name = serializers.CharField()
+    holder = serializers.CharField(allow_blank=True)
+    quantity = serializers.IntegerField()
+    since = serializers.DateTimeField(allow_null=True)
+    due = serializers.DateTimeField(allow_null=True)
+    makerspace_id = serializers.IntegerField()
+    reference_id = serializers.IntegerField()
+    status = serializers.CharField()
+
+
+class LedgerResponseSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    results = LedgerRowSerializer(many=True)
+
+
 class AssetGenerateItemSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     asset_tag = serializers.CharField()

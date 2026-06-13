@@ -1,0 +1,226 @@
+from datetime import timedelta
+
+import pytest
+from django.utils import timezone
+
+from apps.accounts.models import User
+from apps.hardware_requests.models import HardwareRequest, HardwareRequestItem, PublicToolLoan
+from tests.return_helpers import authenticated_client, make_member, make_product, make_space, make_user
+
+pytestmark = pytest.mark.django_db
+
+
+def _request_loan(
+    makerspace,
+    product,
+    username,
+    *,
+    quantity=1,
+    returned=0,
+    status=None,
+    requester=None,
+):
+    requester = requester or make_user(username, access_status=User.AccessStatus.ACTIVE)
+    issued_at = timezone.now() - timedelta(days=2)
+    hardware_request = HardwareRequest.objects.create(
+        makerspace=makerspace,
+        requester=requester,
+        requester_username=requester.username,
+        status=status or HardwareRequest.Status.ISSUED,
+        issued_at=issued_at,
+        return_due_at=issued_at + timedelta(days=7),
+    )
+    HardwareRequestItem.objects.create(
+        request=hardware_request,
+        product=product,
+        requested_quantity=quantity,
+        accepted_quantity=quantity,
+        issued_quantity=quantity,
+        returned_quantity=returned,
+    )
+    return hardware_request
+
+
+def _self_checkout_loan(makerspace, product, username):
+    requester = make_user(username, access_status=User.AccessStatus.ACTIVE)
+    issued_at = timezone.now() - timedelta(days=1)
+    hardware_request = HardwareRequest.objects.create(
+        makerspace=makerspace,
+        requester=requester,
+        requester_username=requester.username,
+        status=HardwareRequest.Status.ISSUED,
+        issued_at=issued_at,
+    )
+    HardwareRequestItem.objects.create(
+        request=hardware_request,
+        product=product,
+        requested_quantity=1,
+        accepted_quantity=1,
+        issued_quantity=1,
+    )
+    loan = PublicToolLoan.objects.create(
+        makerspace=makerspace,
+        request=hardware_request,
+        requester=requester,
+        target_type="product",
+        target_id=product.id,
+        target_label=product.name,
+        status=PublicToolLoan.Status.CHECKED_OUT,
+        due_at=issued_at + timedelta(days=3),
+    )
+    loan.checked_out_at = issued_at
+    loan.save(update_fields=["checked_out_at"])
+    return loan
+
+
+def test_ledger_returns_outstanding_request_and_self_checkout_scoped_to_makerspace():
+    makerspace = make_space("ledger-scope-a")
+    other_space = make_space("ledger-scope-b")
+    manager = make_member("ledger-manager-a", makerspace)
+    request_product = make_product(makerspace, name="Oscilloscope")
+    self_product = make_product(makerspace, name="Logic Analyzer")
+    other_product = make_product(other_space, name="Foreign Meter")
+    request_loan = _request_loan(
+        makerspace,
+        request_product,
+        "ledger-requester-a",
+        quantity=3,
+        returned=1,
+        status=HardwareRequest.Status.PARTIALLY_RETURNED,
+    )
+    self_loan = _self_checkout_loan(makerspace, self_product, "ledger-self-a")
+    _request_loan(other_space, other_product, "ledger-requester-b", quantity=4)
+
+    response = authenticated_client(manager).get(f"/api/v1/admin/makerspace/{makerspace.id}/ledger")
+
+    assert response.status_code == 200
+    assert response.data["count"] == 2
+    rows = {(row["source"], row["item_name"]): row for row in response.data["results"]}
+    assert rows[("request", "Oscilloscope")]["quantity"] == 2
+    assert rows[("request", "Oscilloscope")]["reference_id"] == request_loan.id
+    assert rows[("self_checkout", "Logic Analyzer")]["quantity"] == 1
+    assert rows[("self_checkout", "Logic Analyzer")]["reference_id"] == self_loan.id
+    assert {row["makerspace_id"] for row in response.data["results"]} == {makerspace.id}
+
+
+def test_ledger_excludes_fully_returned_loans():
+    makerspace = make_space("ledger-returned")
+    manager = make_member("ledger-returned-manager", makerspace)
+    product = make_product(makerspace, name="Returned Drill")
+    _request_loan(
+        makerspace,
+        product,
+        "ledger-returned-holder",
+        quantity=2,
+        returned=2,
+        status=HardwareRequest.Status.PARTIALLY_RETURNED,
+    )
+
+    response = authenticated_client(manager).get(f"/api/v1/admin/makerspace/{makerspace.id}/ledger")
+
+    assert response.status_code == 200
+    assert response.data == {"count": 0, "results": []}
+
+
+def test_space_manager_cannot_read_other_makerspace_ledger_and_sees_own_rows():
+    space_a = make_space("ledger-manager-a-space")
+    space_b = make_space("ledger-manager-b-space")
+    manager_a = make_member("ledger-manager-only-a", space_a)
+    product_a = make_product(space_a, name="A Tool")
+    product_b = make_product(space_b, name="B Tool")
+    _request_loan(space_a, product_a, "ledger-holder-a")
+    _request_loan(space_b, product_b, "ledger-holder-b")
+    client = authenticated_client(manager_a)
+
+    denied = client.get(f"/api/v1/admin/makerspace/{space_b.id}/ledger")
+    allowed = client.get(f"/api/v1/admin/makerspace/{space_a.id}/ledger")
+
+    assert denied.status_code in (403, 404)
+    assert allowed.status_code == 200
+    assert allowed.data["count"] == 1
+    assert allowed.data["results"][0]["item_name"] == "A Tool"
+
+
+def test_admin_ledger_is_superadmin_only():
+    makerspace = make_space("ledger-admin")
+    manager = make_member("ledger-admin-manager", makerspace)
+    superadmin = make_user(
+        "ledger-admin-super",
+        role=User.Role.SUPERADMIN,
+        access_status=User.AccessStatus.ACTIVE,
+    )
+    product = make_product(makerspace, name="Shared Tool")
+    _request_loan(makerspace, product, "ledger-admin-holder")
+
+    denied = authenticated_client(manager).get("/api/v1/admin/ledger")
+    allowed = authenticated_client(superadmin).get("/api/v1/admin/ledger")
+
+    assert denied.status_code == 403
+    assert allowed.status_code == 200
+    assert allowed.data["count"] == 1
+    assert allowed.data["results"][0]["makerspace_id"] == makerspace.id
+
+
+def test_new_makerspace_reports_return_sane_rows():
+    makerspace = make_space("reports-new")
+    manager = make_member("reports-new-manager", makerspace)
+    alpha = make_product(makerspace, name="Alpha Kit", total_quantity=9, available_quantity=9)
+    beta = make_product(makerspace, name="Beta Kit", total_quantity=5, available_quantity=5)
+    older = timezone.now() - timedelta(days=5)
+    newer = timezone.now() - timedelta(days=1)
+    alpha.created_at = older
+    beta.created_at = newer
+    alpha.save(update_fields=["created_at"])
+    beta.save(update_fields=["created_at"])
+    alice = make_user("reports-alice", access_status=User.AccessStatus.ACTIVE)
+    _request_loan(makerspace, alpha, alice.username, quantity=2, requester=alice)
+    _request_loan(makerspace, alpha, alice.username, quantity=3, requester=alice)
+    _request_loan(makerspace, beta, "reports-bob", quantity=1)
+    client = authenticated_client(manager)
+
+    most_lent = client.get(f"/api/v1/admin/makerspace/{makerspace.id}/analytics/most-lent")
+    top_borrowers = client.get(f"/api/v1/admin/makerspace/{makerspace.id}/analytics/top-borrowers")
+    recently_added = client.get(f"/api/v1/admin/makerspace/{makerspace.id}/analytics/recently-added")
+
+    assert most_lent.status_code == 200
+    assert most_lent.data["rows"][0] == ["product_name", "times_lent", "total_quantity_lent"]
+    assert most_lent.data["rows"][1] == ["Alpha Kit", 2, 5]
+    assert top_borrowers.status_code == 200
+    assert top_borrowers.data["rows"][0] == ["holder", "requests", "items_borrowed"]
+    assert top_borrowers.data["rows"][1] == ["reports-alice", 2, 5]
+    assert recently_added.status_code == 200
+    assert recently_added.data["rows"][0] == ["product_name", "created_at", "total_quantity"]
+    assert recently_added.data["rows"][1][0] == "Beta Kit"
+
+
+def test_superadmin_aggregate_reports_work_and_non_superadmin_is_forbidden():
+    space_a = make_space("reports-aggregate-a")
+    space_b = make_space("reports-aggregate-b")
+    manager = make_member("reports-aggregate-manager", space_a)
+    superadmin = make_user(
+        "reports-aggregate-super",
+        role=User.Role.SUPERADMIN,
+        access_status=User.AccessStatus.ACTIVE,
+    )
+    product_a = make_product(space_a, name="Aggregate A")
+    product_b = make_product(space_b, name="Aggregate B")
+    _request_loan(space_a, product_a, "reports-aggregate-holder-a", quantity=2)
+    _request_loan(space_b, product_b, "reports-aggregate-holder-b", quantity=3)
+
+    denied_analytics = authenticated_client(manager).get("/api/v1/admin/analytics/most-lent")
+    allowed_analytics = authenticated_client(superadmin).get("/api/v1/admin/analytics/most-lent")
+    denied_export = authenticated_client(manager).get("/api/v1/admin/reports/most-lent/export")
+    allowed_export = authenticated_client(superadmin).get("/api/v1/admin/reports/most-lent/export")
+
+    assert denied_analytics.status_code == 403
+    assert allowed_analytics.status_code == 200
+    assert allowed_analytics.data["rows"][0] == [
+        "makerspace_id",
+        "product_name",
+        "times_lent",
+        "total_quantity_lent",
+    ]
+    assert {row[0] for row in allowed_analytics.data["rows"][1:]} == {space_a.id, space_b.id}
+    assert denied_export.status_code == 403
+    assert allowed_export.status_code == 200
+    assert b"makerspace_id" in allowed_export.content

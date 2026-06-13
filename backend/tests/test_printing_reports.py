@@ -1,0 +1,261 @@
+from datetime import datetime, timezone
+from decimal import Decimal
+
+import pytest
+from django.urls import reverse
+
+from apps.accounts.models import User
+from apps.makerspaces.models import MakerspaceMembership
+from apps.printing.models import FilamentSpool, PrintPrinter, PrintRequest
+from tests.test_printing import (
+    authenticated_client,
+    make_bucket,
+    make_member,
+    make_print_manager,
+    make_request,
+    make_space,
+    make_user,
+)
+
+pytestmark = pytest.mark.django_db
+
+
+def makerspace_report_url(makerspace):
+    return reverse(
+        "printing:makerspace-report",
+        kwargs={"makerspace_id": makerspace.id},
+    )
+
+
+def admin_report_url():
+    return reverse("printing:admin-report")
+
+
+def completed_at(year, month, day, hour, minute=0):
+    return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+
+
+def make_completed_request(
+    bucket,
+    requester,
+    printer,
+    spool,
+    title,
+    minutes,
+    grams,
+    completed,
+):
+    return PrintRequest.objects.create(
+        bucket=bucket,
+        requester=requester,
+        title=title,
+        quantity=1,
+        status=PrintRequest.Status.COMPLETED,
+        printer=printer,
+        filament_spool=spool,
+        estimated_minutes=minutes,
+        estimated_filament_grams=Decimal(grams),
+        completed_at=completed,
+    )
+
+
+def test_makerspace_printing_report_aggregates_totals_hours_filament_and_periods():
+    makerspace = make_space("reports-main")
+    other_space = make_space("reports-other")
+    bucket = make_bucket(makerspace)
+    other_bucket = make_bucket(other_space)
+    requester = make_user("reports-requester", access_status=User.AccessStatus.ACTIVE)
+    manager = make_print_manager("reports-manager", makerspace)
+    printer = PrintPrinter.objects.create(makerspace=makerspace, name="Prusa MK4")
+    spool = FilamentSpool.objects.create(
+        makerspace=makerspace,
+        printer=printer,
+        material="PLA",
+        color="black",
+        initial_weight_grams=1000,
+        remaining_weight_grams=650,
+    )
+    other_printer = PrintPrinter.objects.create(makerspace=other_space, name="Other")
+    other_spool = FilamentSpool.objects.create(
+        makerspace=other_space,
+        printer=other_printer,
+        material="PETG",
+        color="orange",
+        initial_weight_grams=1000,
+        remaining_weight_grams=900,
+    )
+
+    make_completed_request(
+        bucket,
+        requester,
+        printer,
+        spool,
+        "Bracket",
+        90,
+        "120.00",
+        completed_at(2026, 5, 1, 10, 15),
+    )
+    make_completed_request(
+        bucket,
+        requester,
+        printer,
+        spool,
+        "Clip",
+        30,
+        "80.50",
+        completed_at(2026, 5, 1, 10, 45),
+    )
+    make_completed_request(
+        bucket,
+        requester,
+        printer,
+        spool,
+        "Case",
+        60,
+        "40.00",
+        completed_at(2026, 5, 2, 11),
+    )
+    make_request(bucket, requester, title="Failed", status=PrintRequest.Status.FAILED)
+    make_request(bucket, requester, title="Rejected", status=PrintRequest.Status.REJECTED)
+    make_request(bucket, requester, title="Pending", status=PrintRequest.Status.PENDING)
+    make_request(bucket, requester, title="Printing", status=PrintRequest.Status.PRINTING)
+    make_request(bucket, requester, title="Accepted", status=PrintRequest.Status.ACCEPTED)
+    make_completed_request(
+        other_bucket,
+        requester,
+        other_printer,
+        other_spool,
+        "Other space",
+        500,
+        "500.00",
+        completed_at(2026, 5, 1, 10),
+    )
+
+    response = authenticated_client(manager).get(makerspace_report_url(makerspace))
+
+    assert response.status_code == 200
+    assert response.data["totals"] == {
+        "total_requests": 8,
+        "completed": 3,
+        "failed": 1,
+        "rejected": 1,
+        "pending": 1,
+        "printing": 1,
+        "accepted": 1,
+    }
+    assert response.data["printer_hours"] == [
+        {
+            "printer_id": printer.id,
+            "printer_name": "Prusa MK4",
+            "completed_requests": 3,
+            "hours": 3.0,
+        }
+    ]
+    assert response.data["filament_used"] == [
+        {
+            "spool_id": spool.id,
+            "material": "PLA",
+            "color": "black",
+            "grams_used": 350.0,
+            "remaining_grams": 650.0,
+        }
+    ]
+    assert response.data["total_grams_used"] == 350.0
+    assert response.data["filament_estimated_by_period"]["by_month"] == [
+        {"period": "2026-05", "grams": 240.5}
+    ]
+    assert response.data["filament_estimated_by_period"]["by_day"] == [
+        {"period": "2026-05-01", "grams": 200.5},
+        {"period": "2026-05-02", "grams": 40.0},
+    ]
+    assert response.data["filament_estimated_by_period"]["by_hour"] == [
+        {"period": "2026-05-01 10:00", "grams": 200.5},
+        {"period": "2026-05-02 11:00", "grams": 40.0},
+    ]
+
+
+def test_makerspace_printing_report_requires_manage_printing_scope():
+    own_space = make_space("reports-scope-own")
+    other_space = make_space("reports-scope-other")
+    guest = make_member(
+        "reports-scope-guest",
+        own_space,
+        membership_role=MakerspaceMembership.Role.GUEST_ADMIN,
+        role=User.Role.GUEST_ADMIN,
+    )
+    manager = make_print_manager("reports-scope-manager", own_space)
+
+    response = authenticated_client(guest).get(makerspace_report_url(own_space))
+    assert response.status_code in (403, 404)
+
+    response = authenticated_client(manager).get(makerspace_report_url(other_space))
+    assert response.status_code in (403, 404)
+
+
+def test_admin_printing_report_is_superadmin_only_and_includes_makerspaces():
+    space_a = make_space("reports-admin-a")
+    space_b = make_space("reports-admin-b")
+    bucket_a = make_bucket(space_a)
+    bucket_b = make_bucket(space_b)
+    requester = make_user("reports-admin-requester", access_status=User.AccessStatus.ACTIVE)
+    manager = make_print_manager("reports-admin-manager", space_a)
+    superadmin = make_user(
+        "reports-admin-super",
+        role=User.Role.SUPERADMIN,
+        access_status=User.AccessStatus.ACTIVE,
+    )
+    printer_a = PrintPrinter.objects.create(makerspace=space_a, name="A1")
+    printer_b = PrintPrinter.objects.create(makerspace=space_b, name="X1")
+    spool_a = FilamentSpool.objects.create(
+        makerspace=space_a,
+        printer=printer_a,
+        material="PLA",
+        color="black",
+        initial_weight_grams=1000,
+        remaining_weight_grams=900,
+    )
+    spool_b = FilamentSpool.objects.create(
+        makerspace=space_b,
+        printer=printer_b,
+        material="ABS",
+        color="white",
+        initial_weight_grams=750,
+        remaining_weight_grams=500,
+    )
+    make_completed_request(
+        bucket_a,
+        requester,
+        printer_a,
+        spool_a,
+        "A print",
+        60,
+        "50.00",
+        completed_at(2026, 6, 1, 9),
+    )
+    make_completed_request(
+        bucket_b,
+        requester,
+        printer_b,
+        spool_b,
+        "B print",
+        120,
+        "75.00",
+        completed_at(2026, 6, 2, 9),
+    )
+
+    response = authenticated_client(manager).get(admin_report_url())
+    assert response.status_code == 403
+
+    response = authenticated_client(superadmin).get(admin_report_url())
+
+    assert response.status_code == 200
+    assert response.data["totals"]["total_requests"] == 2
+    assert response.data["total_grams_used"] == 350.0
+    assert {row["makerspace_id"] for row in response.data["printer_hours"]} == {
+        space_a.id,
+        space_b.id,
+    }
+    assert {row["makerspace_id"] for row in response.data["filament_used"]} == {
+        space_a.id,
+        space_b.id,
+    }

@@ -17,6 +17,7 @@ class User(AbstractUser):
     phone = models.CharField(max_length=32, blank=True)
     external_checkin_user_id = models.CharField(max_length=128, blank=True)
     telegram_user_id = models.CharField(max_length=64, blank=True)
+    must_change_password = models.BooleanField(default=False)
     role = models.CharField(
         max_length=32,
         choices=Role.choices,
