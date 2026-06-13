@@ -161,6 +161,65 @@ def test_admin_ledger_is_superadmin_only():
     assert allowed.data["results"][0]["makerspace_id"] == makerspace.id
 
 
+def test_ledger_reports_every_item_of_a_bundled_loan():
+    """A bundled self-checkout / direct handout has one PublicToolLoan but multiple
+    backing item rows + quantities; the ledger must report each item with its real
+    outstanding quantity, not a single qty:1 line."""
+    makerspace = make_space("ledger-bundled")
+    manager = make_member("ledger-bundled-manager", makerspace)
+    drill = make_product(makerspace, name="Cordless Drill")
+    bits = make_product(makerspace, name="Bit Set")
+    requester = make_user("ledger-bundled-holder", access_status=User.AccessStatus.ACTIVE)
+    issued_at = timezone.now() - timedelta(hours=4)
+    request = HardwareRequest.objects.create(
+        makerspace=makerspace,
+        requester=requester,
+        requester_username=requester.username,
+        status=HardwareRequest.Status.ISSUED,
+        issued_at=issued_at,
+    )
+    HardwareRequestItem.objects.create(
+        request=request, product=drill, requested_quantity=1, accepted_quantity=1, issued_quantity=1
+    )
+    HardwareRequestItem.objects.create(
+        request=request, product=bits, requested_quantity=4, accepted_quantity=4, issued_quantity=4
+    )
+    PublicToolLoan.objects.create(
+        makerspace=makerspace,
+        request=request,
+        requester=requester,
+        target_type="box",
+        target_id=0,
+        target_label="Tool box",
+        status=PublicToolLoan.Status.CHECKED_OUT,
+        source=PublicToolLoan.Source.PUBLIC_SELF_CHECKOUT,
+    )
+
+    response = authenticated_client(manager).get(f"/api/v1/admin/makerspace/{makerspace.id}/ledger")
+
+    assert response.status_code == 200
+    rows = {row["item_name"]: row for row in response.data["results"]}
+    assert rows["Cordless Drill"]["quantity"] == 1
+    assert rows["Bit Set"]["quantity"] == 4
+    assert all(row["source"] == "self_checkout" for row in response.data["results"])
+
+
+def test_active_loans_xlsx_export_handles_timezone_aware_datetimes():
+    """active-loans rows carry tz-aware issued_at; openpyxl rejects tz-aware
+    datetimes, so the XLSX export must normalize them instead of 500ing."""
+    makerspace = make_space("reports-xlsx")
+    manager = make_member("reports-xlsx-manager", makerspace)
+    product = make_product(makerspace, name="Scope")
+    _request_loan(makerspace, product, "reports-xlsx-holder", quantity=1)
+
+    response = authenticated_client(manager).get(
+        f"/api/v1/admin/makerspace/{makerspace.id}/reports/active-loans/export?format=xlsx"
+    )
+
+    assert response.status_code == 200
+    assert "spreadsheetml" in response["Content-Type"]
+
+
 def test_new_makerspace_reports_return_sane_rows():
     makerspace = make_space("reports-new")
     manager = make_member("reports-new-manager", makerspace)

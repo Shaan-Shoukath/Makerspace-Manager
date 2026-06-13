@@ -566,12 +566,23 @@ def _xlsx_response(rows, filename):
     wb = Workbook()
     ws = wb.active
     for row in rows:
-        ws.append(row)
+        # openpyxl raises on tz-aware datetimes ("Excel does not support timezones");
+        # report rows (e.g. active-loans issued_at, returns closed_at) carry aware
+        # datetimes, so drop tzinfo before writing the cell.
+        ws.append([_xlsx_cell(value) for value in row])
     buffer = BytesIO()
     wb.save(buffer)
     response = HttpResponse(buffer.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
+
+def _xlsx_cell(value):
+    from datetime import datetime as _dt
+
+    if isinstance(value, _dt) and value.tzinfo is not None:
+        return value.replace(tzinfo=None)
+    return value
 
 
 def _batch_html(batch):
