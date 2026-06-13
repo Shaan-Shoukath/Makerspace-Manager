@@ -102,6 +102,20 @@ docker compose exec backend python manage.py seed_demo
 docker compose exec backend python manage.py setup_instance
 ```
 
+`setup_instance` creates the first super admin. With no arguments it uses the
+default credentials **`superadmin` / `super123`** and flags the account so the
+password **must be changed on first login** (the staff console blocks everything
+until you set a new one). Override the defaults non-interactively with
+`--username` / `--password` (or the `SETUP_SUPERADMIN_USERNAME` /
+`SETUP_SUPERADMIN_PASSWORD` env vars); when you supply an explicit password the
+forced-change flag is **not** set.
+
+```bash
+# explicit, no forced change:
+docker compose exec backend python manage.py setup_instance \
+  --username admin --password "$(openssl rand -base64 18)"
+```
+
 For production from published images (env vars, TLS, reverse proxy), see
 **[docs/self-hosting.md](docs/self-hosting.md)**.
 
