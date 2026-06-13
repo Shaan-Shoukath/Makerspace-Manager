@@ -1,7 +1,10 @@
-import { Fragment, useEffect, useState } from "react";
 import type React from "react";
+import type { Key } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { DataTable, DetailDrawer, FilterBar, StatusBadge } from "../../components/ui";
+import type { DataTableColumn } from "../../components/ui";
 import { downloadStaffFile, staffRequest } from "../../lib/api";
 
 export type Makerspace = {
@@ -266,8 +269,8 @@ export function Inventory({ makerspace }: { makerspace: Makerspace }) {
   const queryClient = useQueryClient();
   const storageKey = `inventory.view.${makerspace.id}`;
   const [search, setSearch] = useState(() => localStorage.getItem(storageKey) ?? "");
-  const [selected, setSelected] = useState<Record<number, boolean>>({});
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Key[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const products = useStaffGet<{ results: Product[] }>(
     ["inventory", makerspace.id],
     `/admin/makerspace/${makerspace.id}/inventory`,
@@ -285,96 +288,169 @@ export function Inventory({ makerspace }: { makerspace: Makerspace }) {
   const bulkQr = useMutation({
     mutationFn: (enabled: boolean) =>
       Promise.all(
-        Object.keys(selected)
-          .filter((id) => selected[Number(id)])
-          .map((id) =>
-            staffRequest(`/admin/inventory/${id}`, {
-              method: "PATCH",
-              body: JSON.stringify({ public_self_checkout_enabled: enabled }),
-            }),
-          ),
+        selectedIds.map((id) =>
+          staffRequest(`/admin/inventory/${String(id)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ public_self_checkout_enabled: enabled }),
+          }),
+        ),
       ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["inventory", makerspace.id] }),
   });
-  const rows = (products.data?.results ?? []).filter((product) =>
+  const allProducts = products.data?.results ?? [];
+  const rows = allProducts.filter((product) =>
     [product.name, product.description, product.tracking_mode]
       .join(" ")
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
-  const selectedCount = Object.values(selected).filter(Boolean).length;
+  const selectedCount = selectedIds.length;
+  const drawerProduct = selectedProduct ? allProducts.find((product) => product.id === selectedProduct.id) ?? selectedProduct : null;
+  const columns: DataTableColumn<Product>[] = [
+    {
+      key: "name",
+      header: "Name",
+      sortable: true,
+      render: (product) => (
+        <button
+          type="button"
+          className="text-left font-semibold text-ink hover:text-accent"
+          onClick={() => setSelectedProduct(product)}
+        >
+          {product.name}
+        </button>
+      ),
+    },
+    { key: "tracking_mode", header: "Mode", sortable: true },
+    { key: "total_quantity", header: "Total", sortable: true },
+    {
+      key: "available_quantity",
+      header: "Available",
+      sortable: true,
+      render: (product) => <InventoryAvailability product={product} />,
+    },
+    { key: "issued_quantity", header: "Issued", sortable: true },
+    { key: "damaged_quantity", header: "Damaged", sortable: true },
+    { key: "lost_quantity", header: "Lost", sortable: true },
+    {
+      key: "public_self_checkout_enabled",
+      header: "Public QR",
+      render: (product) => (
+        <button className="desk-button" type="button" onClick={() => toggle.mutate(product)}>
+          {product.public_self_checkout_enabled ? "Allowed" : "Off"}
+        </button>
+      ),
+    },
+  ];
   return (
     <Panel title="Inventory">
-      <div className="mb-3 flex flex-wrap gap-2">
-        <input
-          className="desk-input min-w-64 flex-1"
-          placeholder="Filter table"
+      <div className="grid gap-3">
+        <FilterBar
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={setSearch}
+          placeholder="Filter table"
+          actions={(
+            <>
+              <button
+                className="desk-button"
+                type="button"
+                onClick={() => {
+                  localStorage.setItem(storageKey, search);
+                }}
+              >
+                Save view
+              </button>
+              <button className="desk-button" type="button" disabled={!selectedCount || bulkQr.isPending} onClick={() => bulkQr.mutate(true)}>
+                Enable QR
+              </button>
+              <button className="desk-button" type="button" disabled={!selectedCount || bulkQr.isPending} onClick={() => bulkQr.mutate(false)}>
+                Disable QR
+              </button>
+            </>
+          )}
         />
-        <button
-          onClick={() => {
-            localStorage.setItem(storageKey, search);
-          }}
-        >
-          Save view
-        </button>
-        <button disabled={!selectedCount || bulkQr.isPending} onClick={() => bulkQr.mutate(true)}>
-          Enable QR
-        </button>
-        <button disabled={!selectedCount || bulkQr.isPending} onClick={() => bulkQr.mutate(false)}>
-          Disable QR
-        </button>
+        <DataTable<Product>
+          columns={columns}
+          data={rows}
+          getRowId={(row) => row.id}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+          loading={products.isLoading}
+          emptyTitle="No inventory"
+        />
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] text-left text-sm">
-          <thead className="bg-surface text-xs uppercase tracking-wide text-muted"><tr className="border-b border-line"><th className="px-3 py-2">Select</th><th>Name</th><th>Mode</th><th>Total</th><th>Available</th><th>Issued</th><th>Damaged</th><th>Lost</th><th>Public QR</th></tr></thead>
-          <tbody>
-            {rows.map((product) => (
-              <Fragment key={product.id}>
-                <tr className="border-b border-line last:border-b-0">
-                  <td className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(selected[product.id])}
-                      onChange={(event) => setSelected((current) => ({ ...current, [product.id]: event.target.checked }))}
-                    />
-                  </td>
-                  <td className="py-2 font-medium text-ink">
-                    <button className="text-left font-semibold" onClick={() => setExpanded(expanded === product.id ? null : product.id)}>
-                      {product.name}
-                    </button>
-                  </td>
-                  <td>{product.tracking_mode}</td>
-                  <td>{product.total_quantity}</td>
-                  <td>{product.available_quantity}</td>
-                  <td>{product.issued_quantity}</td>
-                  <td>{product.damaged_quantity}</td>
-                  <td>{product.lost_quantity}</td>
-                  <td>
-                    <button onClick={() => toggle.mutate(product)}>
-                      {product.public_self_checkout_enabled ? "Allowed" : "Off"}
-                    </button>
-                  </td>
-                </tr>
-                {expanded === product.id ? (
-                  <tr className="border-b border-line bg-bg">
-                    <td className="px-3 py-3 text-sm text-muted" colSpan={9}>
-                      <div className="grid gap-2 md:grid-cols-3">
-                        <span>Public: {product.is_public ? "yes" : "no"}</span>
-                        <span>Box: {product.box ?? "none"}</span>
-                        <span>Tracking: {product.tracking_mode}</span>
-                      </div>
-                      <p className="mt-2 max-w-3xl">{product.description || "No description."}</p>
-                    </td>
-                  </tr>
-                ) : null}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DetailDrawer
+        open={Boolean(drawerProduct)}
+        title={drawerProduct?.name ?? "Inventory item"}
+        onClose={() => setSelectedProduct(null)}
+      >
+        {drawerProduct ? (
+          <div className="grid gap-4 text-sm">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <InventoryMetric label="Total" value={drawerProduct.total_quantity} />
+              <InventoryMetric label="Available" value={drawerProduct.available_quantity} />
+              <InventoryMetric label="Issued" value={drawerProduct.issued_quantity} />
+              <InventoryMetric label="Damaged" value={drawerProduct.damaged_quantity} />
+              <InventoryMetric label="Lost" value={drawerProduct.lost_quantity} />
+            </div>
+            <dl className="grid gap-2 text-muted">
+              <div className="flex justify-between gap-3">
+                <dt>Tracking mode</dt>
+                <dd className="font-medium text-ink">{drawerProduct.tracking_mode}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt>Public</dt>
+                <dd className="font-medium text-ink">{drawerProduct.is_public ? "yes" : "no"}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt>Public self-checkout</dt>
+                <dd>
+                  <button className="desk-button" type="button" onClick={() => toggle.mutate(drawerProduct)}>
+                    {drawerProduct.public_self_checkout_enabled ? "Allowed" : "Off"}
+                  </button>
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt>Box id</dt>
+                <dd className="font-medium text-ink">{drawerProduct.box ?? "none"}</dd>
+              </div>
+            </dl>
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Description</h3>
+              <p className="mt-2 text-muted">{drawerProduct.description || "No description."}</p>
+            </div>
+          </div>
+        ) : null}
+      </DetailDrawer>
     </Panel>
+  );
+}
+
+function InventoryAvailability({ product }: { product: Product }) {
+  const badge =
+    product.available_quantity <= 0 ? (
+      <StatusBadge status="lost" label="Unavailable" />
+    ) : product.available_quantity <= Math.ceil(product.total_quantity * 0.2) ? (
+      <StatusBadge status="limited" label="Limited" />
+    ) : (
+      <StatusBadge status="available" label="Available" />
+    );
+  // Keep the exact count visible alongside the status band — staff make stock
+  // decisions on the number, not just the band.
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="font-medium text-ink">{product.available_quantity}</span>
+      {badge}
+    </span>
+  );
+}
+
+function InventoryMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-line bg-surface p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className="mt-1 text-xl font-bold text-ink">{value}</p>
+    </div>
   );
 }
 
