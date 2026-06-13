@@ -221,6 +221,13 @@ export function StockTransferPanel({
             <Field label="Reason" className="mt-4">
               <input className="desk-input w-full" value={reason} placeholder="Why is this stock moving?" onChange={(event) => setReason(event.target.value)} />
             </Field>
+            {isCrossMakerspace ? (
+              <p className="mt-4 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">
+                Inter-makerspace transfer: this records an audited transfer between makerspaces.
+                Stock is not automatically relocated across makerspaces — adjust the destination
+                makerspace's inventory separately.
+              </p>
+            ) : null}
             {validationError ? <ErrorText text={validationError} /> : null}
             {create.isError ? <ErrorText text={create.error.message} /> : null}
             {products.isError ? <ErrorText text={products.error.message} /> : null}

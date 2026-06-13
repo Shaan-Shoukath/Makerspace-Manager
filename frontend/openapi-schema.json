@@ -12273,10 +12273,11 @@
             "SourceEnum": {
                 "enum": [
                     "request",
-                    "self_checkout"
+                    "self_checkout",
+                    "direct_handout"
                 ],
                 "type": "string",
-                "description": "* `request` - request\n* `self_checkout` - self_checkout"
+                "description": "* `request` - request\n* `self_checkout` - self_checkout\n* `direct_handout` - direct_handout"
             },
             "StaffMembership": {
                 "type": "object",

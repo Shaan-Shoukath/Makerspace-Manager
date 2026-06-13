@@ -91,5 +91,7 @@ def _require(user, action, makerspace_id):
     # suspended user with an unexpired JWT can't keep issuing/returning loans.
     if getattr(user, "access_status", None) != User.AccessStatus.ACTIVE:
         raise PermissionDenied()
+    if getattr(user, "must_change_password", False):
+        raise PermissionDenied()
     if not rbac.can(user, action, makerspace_id):
         raise PermissionDenied()

@@ -13,6 +13,7 @@ def _active_staff(user):
         getattr(user, "is_authenticated", False)
         and user.role in STAFF_ROLES
         and user.access_status == User.AccessStatus.ACTIVE
+        and not getattr(user, "must_change_password", False)
     )
 
 
@@ -23,6 +24,9 @@ class IsSuperadmin(BasePermission):
             return False
         # re-review fix: a suspended/restricted superadmin must also be blocked.
         if u.access_status != User.AccessStatus.ACTIVE:
+            return False
+        # Default super123 seed must rotate before using protected endpoints.
+        if getattr(u, "must_change_password", False):
             return False
         return u.is_superuser or u.role == User.Role.SUPERADMIN
 
@@ -46,6 +50,8 @@ class HasMakerspaceAction(BasePermission):
     def has_permission(self, request, view):
         user = getattr(request, "user", None)
         if getattr(user, "access_status", None) != User.AccessStatus.ACTIVE:
+            return False
+        if getattr(user, "must_change_password", False):
             return False
         action = getattr(view, "required_action", None)
         if action is None:

@@ -79,7 +79,7 @@ class ReportRowsSerializer(serializers.Serializer):
 
 
 class LedgerRowSerializer(serializers.Serializer):
-    source = serializers.ChoiceField(choices=["request", "self_checkout"])
+    source = serializers.ChoiceField(choices=["request", "self_checkout", "direct_handout"])
     item_name = serializers.CharField()
     holder = serializers.CharField(allow_blank=True)
     quantity = serializers.IntegerField()
