@@ -65,7 +65,7 @@ def notify_request_submitted(request):
     )
     _send_request_message(
         request,
-        f"New hardware request #{request.pk} from {request.requester_username}.",
+        _build_submitted_request_message(request),
     )
     _send_templated_email(request, HardwareEmailTemplate.Key.REQUEST_RECEIVED)
 
@@ -155,6 +155,40 @@ def _send_request_message(request, text):
             "Telegram request notification failed.",
             extra={"request_id": request.pk},
         )
+
+
+def _build_submitted_request_message(request):
+    lines = [
+        f"New hardware request #{request.pk}",
+        f"Requester: {request.requester_username or 'Unknown requester'}",
+    ]
+    if request.requester_contact_email:
+        lines.append(f"Email: {request.requester_contact_email}")
+    if request.requester_contact_phone:
+        lines.append(f"Phone: {request.requester_contact_phone}")
+    if request.requested_for:
+        # requested_for is an uncapped TextField; clamp it so one long value can't
+        # push the payload past Telegram's 4096-char limit (a failed send would be
+        # swallowed by _send_request_message, dropping the alert + approve buttons).
+        lines.append(f"Requested for: {_clamp(request.requested_for, 300)}")
+
+    items = list(request.items.select_related("product"))
+    if items:
+        lines.append("Items:")
+        shown = items[:40]
+        for item in shown:
+            lines.append(f"- {_clamp(item.product.name, 80)}: {item.requested_quantity}")
+        if len(items) > len(shown):
+            lines.append(f"- ...and {len(items) - len(shown)} more")
+    else:
+        lines.append("Items: None")
+    # Final safety net: stay under Telegram's hard 4096-char text limit.
+    return _clamp("\n".join(lines), 4000)
+
+
+def _clamp(text, limit):
+    text = str(text)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _send_templated_email(request, key):

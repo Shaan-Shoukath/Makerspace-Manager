@@ -6,8 +6,9 @@ import pytest
 from django.test import override_settings
 
 from apps.accounts.models import User
-from apps.hardware_requests.models import HardwareRequest
-from apps.integrations.telegram import send_message
+from apps.hardware_requests import notifications
+from apps.hardware_requests.models import HardwareRequest, HardwareRequestItem
+from apps.integrations.telegram import TelegramDeliveryError, send_message
 from tests.return_helpers import authenticated_client, make_accepted_request, make_member, make_product, make_space
 
 pytestmark = pytest.mark.django_db
@@ -142,6 +143,111 @@ def test_telegram_delivery_uses_decrypted_makerspace_bot_token(monkeypatch, sett
         "text": "hello",
     }
     assert makerspace.telegram_bot_token != "bot-token"
+
+
+def test_submitted_request_telegram_alert_includes_contact_and_items(monkeypatch):
+    makerspace = make_space("telegram-submitted-alert")
+    requester = User.objects.create_user(
+        username="requester-alert",
+        role=User.Role.REQUESTER,
+        access_status=User.AccessStatus.ACTIVE,
+    )
+    product = make_product(makerspace, name="Bench Meter")
+    second_product = make_product(makerspace, name="Logic Analyzer")
+    hardware_request = HardwareRequest.objects.create(
+        makerspace=makerspace,
+        requester=requester,
+        requester_username=requester.username,
+        requester_contact_email="requester@example.com",
+        requester_contact_phone="+15551234567",
+        requested_for="Robotics workshop",
+        status=HardwareRequest.Status.PENDING_APPROVAL,
+    )
+    HardwareRequestItem.objects.create(
+        request=hardware_request,
+        product=product,
+        requested_quantity=2,
+    )
+    HardwareRequestItem.objects.create(
+        request=hardware_request,
+        product=second_product,
+        requested_quantity=3,
+    )
+    sent = Mock(return_value=True)
+    monkeypatch.setattr(notifications, "send_message", sent)
+    monkeypatch.setattr(notifications, "_send_templated_email", Mock(return_value=False))
+
+    notifications.notify_request_submitted(hardware_request)
+
+    text = sent.call_args.args[1]
+    assert "requester@example.com" in text
+    assert "+15551234567" in text
+    assert "Robotics workshop" in text
+    assert "Bench Meter: 2" in text
+    assert "Logic Analyzer: 3" in text
+    assert "parse_mode" not in sent.call_args.kwargs
+    assert sent.call_args.kwargs["reply_markup"]["inline_keyboard"]
+
+
+def test_submitted_request_telegram_delivery_error_is_swallowed(monkeypatch):
+    makerspace = make_space("telegram-submitted-failure")
+    requester = User.objects.create_user(
+        username="requester-failure",
+        role=User.Role.REQUESTER,
+        access_status=User.AccessStatus.ACTIVE,
+    )
+    product = make_product(makerspace)
+    hardware_request = HardwareRequest.objects.create(
+        makerspace=makerspace,
+        requester=requester,
+        requester_username=requester.username,
+        status=HardwareRequest.Status.PENDING_APPROVAL,
+    )
+    HardwareRequestItem.objects.create(
+        request=hardware_request,
+        product=product,
+        requested_quantity=1,
+    )
+    sent = Mock(side_effect=TelegramDeliveryError("delivery failed"))
+    monkeypatch.setattr(notifications, "send_message", sent)
+    monkeypatch.setattr(notifications, "_send_templated_email", Mock(return_value=False))
+
+    notifications.notify_request_submitted(hardware_request)
+
+    sent.assert_called_once()
+
+
+def test_submitted_request_telegram_message_stays_within_limit(monkeypatch):
+    # A long requested_for must not push the payload past Telegram's 4096-char
+    # limit, or the failed send would be swallowed and the alert lost.
+    makerspace = make_space("telegram-long-message")
+    requester = User.objects.create_user(
+        username="requester-long",
+        role=User.Role.REQUESTER,
+        access_status=User.AccessStatus.ACTIVE,
+    )
+    product = make_product(makerspace, name="Bench Meter")
+    hardware_request = HardwareRequest.objects.create(
+        makerspace=makerspace,
+        requester=requester,
+        requester_username=requester.username,
+        requested_for="x" * 9000,
+        status=HardwareRequest.Status.PENDING_APPROVAL,
+    )
+    HardwareRequestItem.objects.create(
+        request=hardware_request,
+        product=product,
+        requested_quantity=1,
+    )
+    sent = Mock(return_value=True)
+    monkeypatch.setattr(notifications, "send_message", sent)
+    monkeypatch.setattr(notifications, "_send_templated_email", Mock(return_value=False))
+
+    notifications.notify_request_submitted(hardware_request)
+
+    text = sent.call_args.args[1]
+    assert len(text) <= 4096
+    assert sent.call_args.kwargs["reply_markup"]["inline_keyboard"]
 
 
 @override_settings(TELEGRAM_WEBHOOK_SECRET="")
