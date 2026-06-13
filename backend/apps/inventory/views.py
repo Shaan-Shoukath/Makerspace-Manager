@@ -4,8 +4,8 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.generics import ListAPIView
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.permissions import AllowAny
-from rest_framework.throttling import ScopedRateThrottle
 
+from apps.apiclients.throttling import ClientTierRateThrottle
 from apps.inventory.serializers import (
     PublicMakerspaceSerializer,
     PublicProductSerializer,
@@ -25,7 +25,7 @@ from apps.openapi import PUBLISHABLE_KEY_PARAMETER
 )
 class PublicMakerspaceListView(ListAPIView):
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientTierRateThrottle]
     throttle_scope = "public_read"
     serializer_class = PublicMakerspaceSerializer
     pagination_class = None
@@ -59,7 +59,7 @@ class PublicMakerspaceListView(ListAPIView):
 )
 class PublicInventoryListView(ListAPIView):
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientTierRateThrottle]
     throttle_scope = "public_read"
     serializer_class = PublicProductSerializer
 
@@ -89,7 +89,7 @@ class PublicInventoryListView(ListAPIView):
 )
 class PublicInventoryDetailView(RetrieveAPIView):
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientTierRateThrottle]
     throttle_scope = "public_read"
     serializer_class = PublicProductSerializer
 

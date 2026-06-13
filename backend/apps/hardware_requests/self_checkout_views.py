@@ -2,9 +2,9 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from apps.apiclients.throttling import ClientTierRateThrottle
 from apps.hardware_requests import self_checkout_workflow
 from apps.hardware_requests.self_checkout_serializers import (
     PublicToolLoanSerializer,
@@ -19,7 +19,7 @@ from rest_framework.exceptions import ValidationError
 
 class PublicToolCheckoutView(APIView):
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientTierRateThrottle]
     throttle_scope = "request_submit"
 
     @extend_schema(
@@ -46,7 +46,7 @@ class PublicToolCheckoutView(APIView):
 
 class PublicToolReturnView(APIView):
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientTierRateThrottle]
     throttle_scope = "request_submit"
 
     @extend_schema(

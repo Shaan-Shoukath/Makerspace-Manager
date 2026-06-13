@@ -17,13 +17,19 @@ class FrontendHMACMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        if self._should_validate(request) and not self._is_valid(request):
+        is_valid = True
+        if self._is_protected_path(request):
+            is_valid = self._is_valid(request)
+        if self._should_validate(request) and not is_valid:
             return JsonResponse({"detail": "Invalid client signature."}, status=401)
         return self.get_response(request)
 
     def _should_validate(self, request):
         if request.method == "OPTIONS" or not settings.API_CLIENT_AUTH_REQUIRED:
             return False
+        return self._is_protected_path(request)
+
+    def _is_protected_path(self, request):
         return any(
             request.path.startswith(p) for p in settings.HMAC_PROTECTED_PATH_PREFIXES
         )
@@ -71,7 +77,10 @@ class FrontendHMACMiddleware:
             expected = hmac.new(
                 client.get_secret().encode(), message, hashlib.sha256
             ).hexdigest()
-            return hmac.compare_digest(signature, expected)
+            if not hmac.compare_digest(signature, expected):
+                return False
+            request.api_client = client
+            return True
         except Exception:  # fail safe - never 500 the request flow
             logger.exception("ApiClient signature validation failed")
             return False
@@ -135,6 +144,11 @@ class FrontendHMACMiddleware:
             ).first()
             if client is None:
                 return False
+            # NOTE: a browser client is identified only by client_id + Origin, both
+            # of which are public frontend config and forgeable by a non-browser
+            # caller. So this path verifies access but is NOT a trust anchor for
+            # rate-limit elevation — we deliberately do NOT attach request.api_client
+            # here. Only the HMAC-signed server path (in _is_valid) grants a tier.
             return (
                 client.client_type == "browser"
                 and self._origin_ok(request, client)

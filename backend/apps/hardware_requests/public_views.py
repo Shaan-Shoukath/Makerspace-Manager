@@ -3,9 +3,9 @@ from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from apps.apiclients.throttling import ClientTierRateThrottle
 from apps.checkin import client as checkin
 from apps.hardware_requests import workflow
 from apps.hardware_requests.serializers import (
@@ -35,7 +35,7 @@ from apps.openapi import (
 
 class CheckinVerifyView(APIView):
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientTierRateThrottle]
     throttle_scope = "checkin_verify"
 
     @extend_schema(
@@ -59,7 +59,7 @@ class CheckinVerifyView(APIView):
 
 class RequestSubmitView(APIView):
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientTierRateThrottle]
     throttle_scope = "request_submit"
 
     @extend_schema(
@@ -107,7 +107,7 @@ class RequestSubmitView(APIView):
 
 class RequestStatusView(generics.RetrieveAPIView):
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientTierRateThrottle]
     throttle_scope = "request_status"
     serializer_class = PublicRequestStatusSerializer
     lookup_field = "public_token"
@@ -131,7 +131,7 @@ class RequestStatusView(generics.RetrieveAPIView):
 
 class RequestLookupView(APIView):
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [ClientTierRateThrottle]
     throttle_scope = "request_status"
 
     @extend_schema(
