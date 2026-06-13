@@ -4,6 +4,7 @@ import type {
   Makerspace,
   PaginatedResponse,
   Product,
+  PublicCategory,
   PublicToolLoan,
   PublicRequestStatus,
   RequestSubmitResponse,
@@ -11,8 +12,23 @@ import type {
 
 export const publicMakerspacesKey = ["public-makerspaces"] as const;
 
-export const publicInventoryKey = (slug: string, page: number, query: string) =>
-  ["public-inventory", slug, page, query] as const;
+export const publicCategoriesKey = (slug: string) =>
+  ["public-categories", slug] as const;
+export const publicInventoryKey = (
+  slug: string,
+  page: number,
+  query: string,
+  category?: string,
+  sort?: string,
+) =>
+  [
+    "public-inventory",
+    slug,
+    page,
+    query,
+    category ?? "",
+    sort ?? "name",
+  ] as const;
 export const publicInventoryDetailKey = (slug: string, id: number) =>
   ["public-inventory-detail", slug, id] as const;
 
@@ -20,10 +36,18 @@ export async function fetchPublicMakerspaces(): Promise<Makerspace[]> {
   return apiGet<Makerspace[]>("/public/makerspaces/");
 }
 
+export async function fetchPublicCategories(
+  slug: string,
+): Promise<PublicCategory[]> {
+  return apiGet<PublicCategory[]>(`/public/${slug}/inventory/categories/`);
+}
+
 export async function fetchPublicInventory(
   slug: string,
   page: number,
   query: string,
+  category?: string,
+  sort?: string,
 ): Promise<PaginatedResponse<Product>> {
   const params = new URLSearchParams();
   if (page > 1) {
@@ -31,6 +55,12 @@ export async function fetchPublicInventory(
   }
   if (query.trim()) {
     params.set("q", query.trim());
+  }
+  if (category) {
+    params.set("category", category);
+  }
+  if (sort && sort !== "name") {
+    params.set("sort", sort);
   }
 
   const suffix = params.toString() ? `?${params.toString()}` : "";

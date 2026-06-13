@@ -5,12 +5,25 @@ import { Link, useParams } from "react-router-dom";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Card } from "../../components/ui/Card";
 import { Spinner } from "../../components/ui/Spinner";
-import type { Product, RequestCartItem } from "../../types/inventory";
+import type {
+  Product,
+  PublicCategory,
+  RequestCartItem,
+} from "../../types/inventory";
 import { ProductCard } from "./ProductCard";
 import { PublicRequestPanel } from "./PublicRequestPanel";
-import { usePublicInventory, useTenantBootstrap } from "./usePublicInventory";
+import {
+  usePublicCategories,
+  usePublicInventory,
+  useTenantBootstrap,
+} from "./usePublicInventory";
 
 const PAGE_SIZE = 24;
+
+type View =
+  | { kind: "all" }
+  | { kind: "sort"; sort: "popular" | "most_used" }
+  | { kind: "category"; slug: string };
 
 function formatSlug(slug: string): string {
   return slug
@@ -54,15 +67,114 @@ function ErrorState({ error }: { error: Error }) {
   );
 }
 
+function CatalogSidebar({
+  categories,
+  view,
+  onSelect,
+}: {
+  categories: PublicCategory[];
+  view: View;
+  onSelect: (view: View) => void;
+}) {
+  const itemClass = (active: boolean) =>
+    active
+      ? "desk-button-primary w-full justify-between"
+      : "desk-button w-full justify-between";
+  const countClass = (active: boolean) =>
+    active ? "ml-2 text-xs text-bg/80" : "ml-2 text-xs text-muted";
+
+  return (
+    <Card className="lg:sticky lg:top-4">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+        Browse
+      </h2>
+      <div className="mt-3 space-y-2">
+        <button
+          aria-current={view.kind === "all" ? "page" : undefined}
+          className={itemClass(view.kind === "all")}
+          type="button"
+          onClick={() => onSelect({ kind: "all" })}
+        >
+          <span>All items</span>
+        </button>
+        <button
+          aria-current={
+            view.kind === "sort" && view.sort === "popular"
+              ? "page"
+              : undefined
+          }
+          className={itemClass(view.kind === "sort" && view.sort === "popular")}
+          type="button"
+          onClick={() => onSelect({ kind: "sort", sort: "popular" })}
+        >
+          <span>Popular</span>
+        </button>
+        <button
+          aria-current={
+            view.kind === "sort" && view.sort === "most_used"
+              ? "page"
+              : undefined
+          }
+          className={itemClass(
+            view.kind === "sort" && view.sort === "most_used",
+          )}
+          type="button"
+          onClick={() => onSelect({ kind: "sort", sort: "most_used" })}
+        >
+          <span>Most used</span>
+        </button>
+      </div>
+
+      {categories.length > 0 ? (
+        <>
+          <div className="my-4 border-t border-line" />
+          <div className="space-y-2">
+            {categories.map((category) => {
+              const active =
+                view.kind === "category" && view.slug === category.slug;
+              return (
+                <button
+                  aria-current={active ? "page" : undefined}
+                  className={itemClass(active)}
+                  key={category.id}
+                  type="button"
+                  onClick={() =>
+                    onSelect({ kind: "category", slug: category.slug })
+                  }
+                >
+                  <span className="min-w-0 truncate">{category.name}</span>
+                  <span className={countClass(active)}>
+                    ({category.product_count})
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      ) : null}
+    </Card>
+  );
+}
+
 export function PublicInventoryPage() {
   const { slug } = useParams();
   const makerspaceSlug = slug ?? "";
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [query, setQuery] = useState("");
+  const [view, setView] = useState<View>({ kind: "all" });
   const [cart, setCart] = useState<Record<number, RequestCartItem>>({});
+  const categoryParam = view.kind === "category" ? view.slug : "";
+  const sortParam = view.kind === "sort" ? view.sort : "name";
   const bootstrapQuery = useTenantBootstrap(makerspaceSlug);
-  const inventoryQuery = usePublicInventory(makerspaceSlug, page, query);
+  const categoriesQuery = usePublicCategories(makerspaceSlug);
+  const inventoryQuery = usePublicInventory(
+    makerspaceSlug,
+    page,
+    query,
+    categoryParam,
+    sortParam,
+  );
   const displayName =
     bootstrapQuery.data?.branding.display_name ||
     bootstrapQuery.data?.makerspace.name ||
@@ -71,6 +183,7 @@ export function PublicInventoryPage() {
   const title = `${displayName} Inventory`;
   const modules = new Set(bootstrapQuery.data?.modules ?? []);
   const requestEnabled = modules.has("request_workflow");
+  const categories = categoriesQuery.data ?? [];
   const products = inventoryQuery.data?.results ?? [];
   const pageCount = Math.max(
     1,
@@ -133,6 +246,11 @@ export function PublicInventoryPage() {
     setPage(1);
   }
 
+  function selectView(next: View) {
+    setView(next);
+    setPage(1);
+  }
+
   return (
     <main className="desk-shell">
       <header className="border-b border-line bg-panel">
@@ -160,7 +278,13 @@ export function PublicInventoryPage() {
         </div>
       </header>
 
-      <section className="mx-auto grid max-w-7xl gap-5 px-5 py-6 lg:grid-cols-[1fr_360px] sm:px-8">
+      <section className="mx-auto grid max-w-7xl gap-5 px-5 py-6 lg:grid-cols-[220px_1fr_340px] sm:px-8">
+        <CatalogSidebar
+          categories={categories}
+          view={view}
+          onSelect={selectView}
+        />
+
         <div className="space-y-4">
           <Card>
             <form

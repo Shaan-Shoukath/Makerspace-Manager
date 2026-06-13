@@ -10,8 +10,20 @@ export type Product = {
   id: number;
   name: string;
   description: string;
+  category_id?: number | null;
+  category_name?: string | null;
+  category_slug?: string | null;
   tracking_mode?: "quantity" | "individual";
   availability: Availability;
+};
+
+export type PublicCategory = {
+  id: number;
+  name: string;
+  slug: string;
+  display_order: number;
+  icon: string;
+  product_count: number;
 };
 
 export type Makerspace = {
