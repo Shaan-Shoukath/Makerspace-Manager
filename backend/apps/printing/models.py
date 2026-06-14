@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.core.validators import FileExtensionValidator
 from django.core.validators import MinValueValidator
@@ -187,6 +189,15 @@ class PrintRequest(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+    public_token = models.UUIDField(
+        default=uuid.uuid4,
+        editable=False,
+        unique=True,
+        db_index=True,
+    )
+    project_brief = models.TextField(blank=True)
+    contact_email = models.EmailField(blank=True)
+    contact_phone = models.CharField(max_length=40, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -201,3 +212,35 @@ class PrintRequest(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.status})"
+
+
+class PrintRequestFile(models.Model):
+    class Kind(models.TextChoices):
+        STL = "stl", "STL"
+        SCREENSHOT = "screenshot", "Screenshot"
+
+    print_request = models.ForeignKey(
+        PrintRequest,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="files",
+    )
+    makerspace = models.ForeignKey(
+        "makerspaces.Makerspace",
+        on_delete=models.CASCADE,
+        related_name="print_request_files",
+    )
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    object_key = models.CharField(max_length=255, unique=True)
+    content_type = models.CharField(max_length=128, blank=True)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    owner_checkin_user_id = models.CharField(max_length=255, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    attached_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.kind}:{self.object_key}"

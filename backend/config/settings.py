@@ -153,6 +153,28 @@ STORAGES = {
 EVIDENCE_URL_TTL_SECONDS = env.int("EVIDENCE_URL_TTL_SECONDS", default=300)
 EVIDENCE_MAX_BYTES = env.int("EVIDENCE_MAX_BYTES", default=10485760)
 EVIDENCE_ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp"]
+PRINT_UPLOAD_MAX_BYTES = env.int("PRINT_UPLOAD_MAX_BYTES", default=104857600)  # 100 MB
+PRINT_URL_TTL_SECONDS = env.int("PRINT_URL_TTL_SECONDS", default=300)
+PRINT_ALLOWED_MODEL_EXT = ["stl", "3mf", "step", "stp", "obj"]
+PRINT_ALLOWED_MODEL_MIME = [
+    "",
+    "application/octet-stream",
+    "model/stl",
+    "application/sla",
+    "application/vnd.ms-pki.stl",
+    "model/3mf",
+    "application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
+    "application/step",
+    "model/step",
+    "text/plain",
+]
+PRINT_ALLOWED_SCREENSHOT_EXT = ["png", "jpg", "jpeg", "webp", "pdf"]
+PRINT_ALLOWED_SCREENSHOT_MIME = [
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "application/pdf",
+]
 
 CHECKIN_MODE = env("CHECKIN_MODE", default="stub")
 CHECKIN_API_URL = env("CHECKIN_API_URL", default="")
