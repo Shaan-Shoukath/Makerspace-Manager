@@ -73,6 +73,84 @@ export function BarChart({ rows, valueLabel }: { rows: ChartRow[]; valueLabel?: 
   );
 }
 
+// Fixed categorical palette (readable on both light + dark theme tokens). Kept
+// dependency-free per repo convention — no chart library.
+const PIE_COLORS = [
+  "#6366f1",
+  "#22c55e",
+  "#f59e0b",
+  "#ef4444",
+  "#06b6d4",
+  "#a855f7",
+  "#ec4899",
+  "#84cc16",
+];
+
+export function PieChart({ rows, valueLabel }: { rows: ChartRow[]; valueLabel?: string }) {
+  const data = rows.filter((row) => row.value > 0);
+  const total = data.reduce((sum, row) => sum + row.value, 0);
+  if (!data.length || total <= 0) return <p className="text-sm text-muted">No chart data.</p>;
+
+  const size = 160;
+  const radius = 60;
+  const strokeWidth = 26;
+  const center = size / 2;
+  const circumference = 2 * Math.PI * radius;
+
+  let consumed = 0;
+  const segments = data.map((row, index) => {
+    const fraction = row.value / total;
+    const dash = fraction * circumference;
+    const segment = {
+      color: PIE_COLORS[index % PIE_COLORS.length],
+      dash,
+      gap: circumference - dash,
+      offset: -consumed,
+      label: row.label,
+      value: row.value,
+      pct: fraction * 100,
+    };
+    consumed += dash;
+    return segment;
+  });
+
+  return (
+    <div className="flex flex-wrap items-center gap-4">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0" role="img" aria-label="Pie chart">
+        <g transform={`rotate(-90 ${center} ${center})`}>
+          {segments.map((segment, index) => (
+            <circle
+              key={`${segment.label}-${index}`}
+              cx={center}
+              cy={center}
+              r={radius}
+              fill="none"
+              stroke={segment.color}
+              strokeWidth={strokeWidth}
+              strokeDasharray={`${segment.dash} ${segment.gap}`}
+              strokeDashoffset={segment.offset}
+            />
+          ))}
+        </g>
+      </svg>
+      <ul className="min-w-0 flex-1 space-y-1 text-sm">
+        {segments.map((segment, index) => (
+          <li key={`${segment.label}-legend-${index}`} className="flex items-center gap-2">
+            <span className="h-3 w-3 shrink-0 rounded-sm" style={{ backgroundColor: segment.color }} />
+            <span className="truncate text-ink" title={segment.label}>
+              {segment.label}
+            </span>
+            <span className="ml-auto whitespace-nowrap text-xs text-muted">
+              {formatNumber(segment.value)}
+              {valueLabel ?? ""} · {segment.pct.toFixed(0)}%
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function ReportTable({ data }: { data?: ReportRows }) {
   const tableHeaders = headers(data);
   const rows = reportRows(data);

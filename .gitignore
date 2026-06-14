@@ -19,8 +19,10 @@ frontend/vite.config.js
 frontend/vite.config.d.ts
 *.tsbuildinfo
 
-# Codex scratch prompts
+# Codex / agent scratch prompts + orchestration artifacts
 .codex-prompt-*.txt
+.cbrand*.txt
+.cplan.md
 
 # Internal planning + design docs — kept local, not published to the repo.
 # Only curated user/ops docs are committed (e.g. docs/setup-for-makerspaces.md,

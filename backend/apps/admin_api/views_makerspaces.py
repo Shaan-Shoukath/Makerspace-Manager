@@ -2,12 +2,14 @@ from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
 from rest_framework import generics
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.response import Response
 
 from apps.accounts import rbac
 from apps.accounts.models import User
 from apps.admin_api.permissions import IsActiveStaff, require_action
 from apps.admin_api.serializers_makerspaces import (
     MakerspaceSerializer,
+    MakerspaceSwitcherSerializer,
     ReturnPolicySerializer,
     TenantFrontendSerializer,
 )
@@ -23,7 +25,41 @@ class MakerspaceListCreateView(generics.ListCreateAPIView):
     pagination_class = None
 
     def get_queryset(self):
-        return rbac.scope_by_action(self.request.user, rbac.Action.VIEW_INVENTORY, Makerspace.objects.all(), field="id").order_by("name")
+        # The staff console switcher must list a makerspace for any staff role
+        # that has a surface there — including print managers, who hold only
+        # MANAGE_PRINTING (no VIEW_INVENTORY). Scope by the union so a pure print
+        # manager isn't stuck on an empty list / "No makerspace" screen. Create
+        # (POST) stays superadmin-only in perform_create, so widening the read
+        # scope here doesn't grant anyone new write access.
+        scope = rbac.makerspaces_for_actions(
+            self.request.user,
+            rbac.Action.VIEW_INVENTORY,
+            rbac.Action.MANAGE_PRINTING,
+        )
+        queryset = Makerspace.objects.all()
+        if scope is rbac.ALL:
+            return queryset.order_by("name")
+        if not scope:
+            return queryset.none()
+        return queryset.filter(id__in=scope).order_by("name")
+
+    def list(self, request, *args, **kwargs):
+        # Serialize PER ROW: the full makerspace config (public_api_key, CORS
+        # origins, SMTP host/username, module/theme config) is only for rows the
+        # user can VIEW_INVENTORY. Rows reachable solely via MANAGE_PRINTING (a
+        # print manager populating the switcher) get the slim serializer. A
+        # mixed-role user (VIEW_INVENTORY in A, print-only in B) therefore sees A
+        # in full and B slim — choosing one serializer for the whole list would
+        # leak B's config. Settings writes stay MANAGE_MAKERSPACE-gated elsewhere.
+        view_scope = rbac.makerspaces_for_action(request.user, rbac.Action.VIEW_INVENTORY)
+        context = self.get_serializer_context()
+
+        def serialize(makerspace):
+            can_view = view_scope is rbac.ALL or makerspace.id in view_scope
+            serializer = MakerspaceSerializer if can_view else MakerspaceSwitcherSerializer
+            return serializer(makerspace, context=context).data
+
+        return Response([serialize(item) for item in self.filter_queryset(self.get_queryset())])
 
     def perform_create(self, serializer):
         if not (self.request.user.is_superuser or self.request.user.role == User.Role.SUPERADMIN):

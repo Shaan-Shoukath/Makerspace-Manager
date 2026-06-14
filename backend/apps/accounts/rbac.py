@@ -96,6 +96,22 @@ def makerspaces_for_action(actor, action):
     )
 
 
+def makerspaces_for_actions(actor, *actions):
+    """Union of makerspace scopes across several actions, or ALL.
+
+    A makerspace is included if the actor's membership role grants ANY of the
+    given actions there. Used where one console surface is reachable by more
+    than one role (e.g. the staff makerspace switcher: VIEW_INVENTORY staff OR
+    print managers with only MANAGE_PRINTING)."""
+    combined = set()
+    for action in actions:
+        scope = makerspaces_for_action(actor, action)
+        if scope is ALL:
+            return ALL
+        combined |= scope
+    return combined
+
+
 def scope_by_action(actor, action, queryset, field="makerspace_id"):
     """Filter queryset to makerspaces where actor's membership grants action."""
     scope = makerspaces_for_action(actor, action)

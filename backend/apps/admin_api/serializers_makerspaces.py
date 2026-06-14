@@ -81,6 +81,21 @@ class MakerspaceSerializer(serializers.ModelSerializer):
         return instance
 
 
+class MakerspaceSwitcherSerializer(serializers.ModelSerializer):
+    """Minimal makerspace row for the staff console switcher.
+
+    Print managers (MANAGE_PRINTING only, no VIEW_INVENTORY) need to pick their
+    makerspace but must NOT see the full config the integration/settings views
+    expose (public_api_key, CORS origins, SMTP host/username, module/theme
+    config). This exposes only what the React console reads to render the
+    switcher + header. telegram_group_chat_id is configuration, not a secret."""
+
+    class Meta:
+        model = Makerspace
+        fields = ["id", "name", "public_code", "slug", "telegram_group_chat_id"]
+        read_only_fields = fields
+
+
 class ReturnPolicySerializer(serializers.ModelSerializer):
     class Meta:
         model = Makerspace

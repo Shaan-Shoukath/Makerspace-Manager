@@ -4,6 +4,7 @@ import { downloadStaffFile } from "../../../lib/api";
 import {
   BarChart,
   DataState,
+  PieChart,
   ReportTable,
   StatCards,
   chartRows,
@@ -39,6 +40,7 @@ type PrintingReport = {
     remaining_grams: number;
     makerspace_id?: number;
   }[];
+  filament_by_brand: { brand: string; grams_used: number; spools: number }[];
   top_requesters: {
     requester_id: number;
     requester: string;
@@ -63,7 +65,25 @@ const periods: { key: PeriodKey; label: string; dataKey: keyof PrintingReport["f
   { key: "hour", label: "Hour", dataKey: "by_hour" },
 ];
 
-export function OperationsReports({ makerspace, isSuperadmin }: { makerspace: Makerspace; isSuperadmin: boolean }) {
+// Print-status pie slices, in a stable display order.
+const statusPie: { key: keyof PrintingReport["totals"]; label: string }[] = [
+  { key: "completed", label: "Completed" },
+  { key: "printing", label: "Printing" },
+  { key: "pending", label: "Pending" },
+  { key: "accepted", label: "Accepted" },
+  { key: "failed", label: "Failed" },
+  { key: "rejected", label: "Rejected" },
+];
+
+export function OperationsReports({
+  makerspace,
+  isSuperadmin,
+  printingOnly = false,
+}: {
+  makerspace: Makerspace;
+  isSuperadmin: boolean;
+  printingOnly?: boolean;
+}) {
   const [allMakerspaces, setAllMakerspaces] = useState(false);
   const [period, setPeriod] = useState<PeriodKey>("month");
   const aggregate = isSuperadmin && allMakerspaces;
@@ -73,16 +93,27 @@ export function OperationsReports({ makerspace, isSuperadmin }: { makerspace: Ma
   // printing routes are mounted under /api/v1/printing/ (not /api/v1/admin/).
   const printingPath = aggregate ? "/printing/admin/printing/reports" : `/printing/admin/makerspace/${makerspace.id}/printing/reports`;
 
-  const summary = useStaffGet<Summary>(["operations-report", "summary", scopeKey], `${analyticsBase}/summary`);
-  const mostLent = useStaffGet<ReportRows>(["operations-report", "most-lent", scopeKey], `${analyticsBase}/most-lent`);
-  const topBorrowers = useStaffGet<ReportRows>(["operations-report", "top-borrowers", scopeKey], `${analyticsBase}/top-borrowers`);
-  const damagedLost = useStaffGet<ReportRows>(["operations-report", "damaged-lost", scopeKey], `${analyticsBase}/damaged-lost`);
-  const recentlyAdded = useStaffGet<ReportRows>(["operations-report", "recently-added", scopeKey], `${analyticsBase}/recently-added`);
+  // Print managers (printingOnly) lack VIEW_INVENTORY, so the hardware analytics
+  // endpoints would 403. Disable those queries entirely rather than render empty,
+  // erroring panels — the printing report is the only one they can see.
+  const hardwareEnabled = !printingOnly;
+  const summary = useStaffGet<Summary>(["operations-report", "summary", scopeKey], `${analyticsBase}/summary`, hardwareEnabled);
+  const mostLent = useStaffGet<ReportRows>(["operations-report", "most-lent", scopeKey], `${analyticsBase}/most-lent`, hardwareEnabled);
+  const topBorrowers = useStaffGet<ReportRows>(["operations-report", "top-borrowers", scopeKey], `${analyticsBase}/top-borrowers`, hardwareEnabled);
+  const damagedLost = useStaffGet<ReportRows>(["operations-report", "damaged-lost", scopeKey], `${analyticsBase}/damaged-lost`, hardwareEnabled);
+  const recentlyAdded = useStaffGet<ReportRows>(["operations-report", "recently-added", scopeKey], `${analyticsBase}/recently-added`, hardwareEnabled);
   const printing = useStaffGet<PrintingReport>(["operations-report", "printing", scopeKey], printingPath);
 
   const activePeriod = periods.find((item) => item.key === period) ?? periods[0];
   const filamentRows = printing.data?.filament_estimated_by_period[activePeriod.dataKey] ?? [];
   const scopeLabel = aggregate ? "all makerspaces" : makerspace.name;
+
+  const statusRows = statusPie
+    .map((item) => ({ label: item.label, value: printing.data?.totals[item.key] ?? 0 }))
+    .filter((row) => row.value > 0);
+  const brandRows = (printing.data?.filament_by_brand ?? [])
+    .slice(0, 8)
+    .map((row) => ({ label: row.brand, value: row.grams_used }));
 
   function exportReport(report: string, format: "csv" | "xlsx") {
     downloadStaffFile(`${reportsBase}/${report}/export?format=${format}`, `${aggregate ? "all-makerspaces-" : ""}${report}.${format}`);
@@ -93,8 +124,14 @@ export function OperationsReports({ makerspace, isSuperadmin }: { makerspace: Ma
       <Panel title="Reports">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-semibold text-ink">Operations reporting for {scopeLabel}</p>
-            <p className="text-xs text-muted">Inventory movement, borrower activity, exceptions, and print usage.</p>
+            <p className="text-sm font-semibold text-ink">
+              {printingOnly ? "3D printing reporting" : "Operations reporting"} for {scopeLabel}
+            </p>
+            <p className="text-xs text-muted">
+              {printingOnly
+                ? "Print jobs, printer hours, and filament usage."
+                : "Inventory movement, borrower activity, exceptions, and print usage."}
+            </p>
           </div>
           {isSuperadmin ? (
             <label className="flex items-center gap-2 text-sm text-ink">
@@ -108,21 +145,25 @@ export function OperationsReports({ makerspace, isSuperadmin }: { makerspace: Ma
             </label>
           ) : null}
         </div>
-        <DataState loading={summary.isLoading} error={summary.error} empty={!summary.data}>
-          <StatCards
-            stats={[
-              ["Products", summary.data?.products],
-              ["Assets", summary.data?.assets],
-              ["Active loans", summary.data?.active_loans],
-              ["Available", summary.data?.available_quantity],
-              ["Issued", summary.data?.issued_quantity],
-              ["Damaged", summary.data?.damaged_quantity],
-              ["Missing", summary.data?.missing_quantity],
-            ]}
-          />
-        </DataState>
+        {!printingOnly ? (
+          <DataState loading={summary.isLoading} error={summary.error} empty={!summary.data}>
+            <StatCards
+              stats={[
+                ["Products", summary.data?.products],
+                ["Assets", summary.data?.assets],
+                ["Active loans", summary.data?.active_loans],
+                ["Available", summary.data?.available_quantity],
+                ["Issued", summary.data?.issued_quantity],
+                ["Damaged", summary.data?.damaged_quantity],
+                ["Missing", summary.data?.missing_quantity],
+              ]}
+            />
+          </DataState>
+        ) : null}
       </Panel>
 
+      {!printingOnly ? (
+      <>
       <Panel title="Exports">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {exportReports.map((report) => (
@@ -170,6 +211,8 @@ export function OperationsReports({ makerspace, isSuperadmin }: { makerspace: Ma
           </DataState>
         </Panel>
       </div>
+      </>
+      ) : null}
 
       <Panel title="3D printing">
         <DataState loading={printing.isLoading} error={printing.error} empty={!printing.data}>
@@ -186,6 +229,17 @@ export function OperationsReports({ makerspace, isSuperadmin }: { makerspace: Ma
                 ["Spool grams used", printing.data?.total_grams_used],
               ]}
             />
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              <div className="rounded-md border border-line bg-bg p-3">
+                <h3 className="mb-3 text-sm font-semibold text-ink">Requests by status</h3>
+                <PieChart rows={statusRows} valueLabel="" />
+              </div>
+              <div className="rounded-md border border-line bg-bg p-3">
+                <h3 className="mb-3 text-sm font-semibold text-ink">Filament share by brand</h3>
+                <PieChart rows={brandRows} valueLabel="g" />
+              </div>
+            </div>
 
             <div>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -237,6 +291,27 @@ export function OperationsReports({ makerspace, isSuperadmin }: { makerspace: Ma
                           ? [row.makerspace_id ?? "", row.material, row.color, row.grams_used, row.remaining_grams]
                           : [row.material, row.color, row.grams_used, row.remaining_grams],
                       ),
+                    ],
+                  }}
+                />
+              </div>
+              <div>
+                <h3 className="mb-2 text-sm font-semibold text-ink">Filament by brand</h3>
+                <BarChart
+                  rows={(printing.data?.filament_by_brand ?? [])
+                    .slice(0, 8)
+                    .map((row) => ({ label: row.brand, value: row.grams_used }))}
+                  valueLabel="g"
+                />
+                <ReportTable
+                  data={{
+                    rows: [
+                      ["brand", "grams_used", "spools"],
+                      ...(printing.data?.filament_by_brand ?? []).map((row) => [
+                        row.brand,
+                        row.grams_used,
+                        row.spools,
+                      ]),
                     ],
                   }}
                 />

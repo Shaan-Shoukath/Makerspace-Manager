@@ -11224,6 +11224,12 @@
                             "$ref": "#/components/schemas/PrintingReportFilamentUsed"
                         }
                     },
+                    "filament_by_brand": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PrintingReportBrand"
+                        }
+                    },
                     "top_requesters": {
                         "type": "array",
                         "items": {
@@ -11239,12 +11245,33 @@
                     }
                 },
                 "required": [
+                    "filament_by_brand",
                     "filament_estimated_by_period",
                     "filament_used",
                     "printer_hours",
                     "top_requesters",
                     "total_grams_used",
                     "totals"
+                ]
+            },
+            "PrintingReportBrand": {
+                "type": "object",
+                "properties": {
+                    "brand": {
+                        "type": "string"
+                    },
+                    "grams_used": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "spools": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "brand",
+                    "grams_used",
+                    "spools"
                 ]
             },
             "PrintingReportFilamentUsed": {

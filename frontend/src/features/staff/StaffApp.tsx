@@ -32,6 +32,15 @@ type AuthUser = {
   makerspaces: { id: number; slug: string; role: string }[];
 };
 
+const ALL_TABS = [
+  "queues", "direct", "inventory", "categories", "printing", "transfers",
+  "stocktake", "ledger", "reports", "bulk", "qr", "api", "users", "audit",
+] as const;
+// Membership roles that get the full staff console. Anything else (print_manager,
+// or an unknown role) is failed closed to the 3D-printing surfaces only.
+const FULL_ACCESS_ROLES = ["space_manager", "inventory_manager", "guest_admin"];
+const PRINTING_TABS = ["printing", "reports"];
+
 export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
   const queryClient = useQueryClient();
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -97,6 +106,18 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
   // Backend treats is_superuser OR role === "superadmin" as superadmin; mirror that.
   const isSuperadmin = user.is_superuser || user.role === "superadmin";
 
+  // Authority is per active makerspace (a user can be print_manager in one and
+  // space_manager in another), so recompute the nav from the selected membership.
+  // Fail closed: only known full-access roles (or superadmin) see the full nav;
+  // print managers + unknown roles get the 3D-printing surfaces only.
+  const activeRole = user.makerspaces.find((item) => item.id === selected)?.role;
+  const fullAccess = isSuperadmin || (!!activeRole && FULL_ACCESS_ROLES.includes(activeRole));
+  const allowedTabs: readonly string[] = fullAccess ? ALL_TABS : PRINTING_TABS;
+  const printingOnly = !fullAccess;
+  // Derived (no useEffect): switching makerspace recomputes synchronously, and a
+  // tab that isn't allowed for the current role falls back to the first allowed.
+  const activeTab = allowedTabs.includes(tab) ? tab : allowedTabs[0];
+
   return (
     <main className="desk-shell grid lg:grid-cols-[260px_1fr]">
       <aside className="border-b border-line bg-panel lg:min-h-screen lg:border-b-0 lg:border-r">
@@ -106,7 +127,7 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
           </span>
           <div>
             <p className="text-sm font-semibold text-ink">Makerspace Manager</p>
-            <p className="text-xs text-muted">{guestOnly ? "Guest admin" : isSuperadmin ? "Super Admin" : "Space Manager"}</p>
+            <p className="text-xs text-muted">{guestOnly ? "Guest admin" : isSuperadmin ? "Super Admin" : printingOnly ? "Print Manager" : "Space Manager"}</p>
           </div>
         </div>
         <div className="p-4">
@@ -122,11 +143,11 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
             ))}
           </select>
           <nav className="mt-4 grid gap-1">
-            {["queues", "direct", "inventory", "categories", "printing", "transfers", "stocktake", "ledger", "reports", "bulk", "qr", "api", "users", "audit"].map((item) => (
+            {allowedTabs.map((item) => (
               <button
                 key={item}
                 className={`rounded-md px-3 py-2 text-left text-sm font-medium transition ${
-                  tab === item
+                  activeTab === item
                     ? "bg-accent text-bg"
                     : "text-muted hover:bg-surface hover:text-ink"
                 }`}
@@ -171,44 +192,44 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
 
         <div className="min-w-0 p-5">
           {!activeMakerspace ? <Panel title="No makerspace">Assign a makerspace to this account.</Panel> : null}
-          {activeMakerspace && tab === "queues" ? (
+          {activeMakerspace && activeTab === "queues" ? (
             <Queues makerspace={activeMakerspace} guestOnly={guestOnly} />
           ) : null}
-          {activeMakerspace && tab === "inventory" ? (
+          {activeMakerspace && activeTab === "inventory" ? (
             <Inventory makerspace={activeMakerspace} />
           ) : null}
-          {activeMakerspace && tab === "categories" ? (
+          {activeMakerspace && activeTab === "categories" ? (
             <Categories makerspace={activeMakerspace} />
           ) : null}
-          {activeMakerspace && tab === "printing" ? (
+          {activeMakerspace && activeTab === "printing" ? (
             <PrintingPanel makerspace={activeMakerspace} />
           ) : null}
-          {activeMakerspace && tab === "transfers" ? (
+          {activeMakerspace && activeTab === "transfers" ? (
             <StockTransferPanel
               makerspace={activeMakerspace}
               makerspaces={makerspaces.data ?? []}
               isSuperadmin={isSuperadmin}
             />
           ) : null}
-          {activeMakerspace && tab === "stocktake" ? (
+          {activeMakerspace && activeTab === "stocktake" ? (
             <StocktakePanel makerspace={activeMakerspace} />
           ) : null}
-          {activeMakerspace && tab === "ledger" ? (
+          {activeMakerspace && activeTab === "ledger" ? (
             <Ledger makerspace={activeMakerspace} isSuperadmin={isSuperadmin} />
           ) : null}
-          {activeMakerspace && tab === "reports" ? (
-            <OperationsReports makerspace={activeMakerspace} isSuperadmin={isSuperadmin} />
+          {activeMakerspace && activeTab === "reports" ? (
+            <OperationsReports makerspace={activeMakerspace} isSuperadmin={isSuperadmin} printingOnly={printingOnly} />
           ) : null}
-          {activeMakerspace && tab === "direct" ? (
+          {activeMakerspace && activeTab === "direct" ? (
             <DirectLoans makerspace={activeMakerspace} />
           ) : null}
-          {activeMakerspace && tab === "bulk" ? <BulkImport makerspace={activeMakerspace} /> : null}
-          {activeMakerspace && tab === "qr" ? <QrTools makerspace={activeMakerspace} /> : null}
-          {activeMakerspace && tab === "api" ? <ApiClientsPanel makerspace={activeMakerspace} /> : null}
-          {activeMakerspace && tab === "users" ? (
+          {activeMakerspace && activeTab === "bulk" ? <BulkImport makerspace={activeMakerspace} /> : null}
+          {activeMakerspace && activeTab === "qr" ? <QrTools makerspace={activeMakerspace} /> : null}
+          {activeMakerspace && activeTab === "api" ? <ApiClientsPanel makerspace={activeMakerspace} /> : null}
+          {activeMakerspace && activeTab === "users" ? (
             <Users makerspaces={makerspaces.data ?? []} isSuperadmin={isSuperadmin} />
           ) : null}
-          {activeMakerspace && tab === "audit" ? <AuditLog /> : null}
+          {activeMakerspace && activeTab === "audit" ? <AuditLog /> : null}
         </div>
       </section>
     </main>

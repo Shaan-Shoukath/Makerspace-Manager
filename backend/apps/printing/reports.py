@@ -27,6 +27,7 @@ def build_printing_report(makerspace_id=None, *, include_makerspace=False):
         "totals": _totals(requests),
         "printer_hours": _printer_hours(requests, include_makerspace),
         "filament_used": _filament_used(spools, include_makerspace),
+        "filament_by_brand": _filament_by_brand(spools),
         "top_requesters": _top_requesters(requests, include_makerspace),
         "total_grams_used": _total_spool_grams_used(spools),
         "filament_estimated_by_period": {
@@ -80,6 +81,24 @@ def _printer_hours(requests, include_makerspace):
             item["makerspace_id"] = row["printer__makerspace_id"]
         data.append(item)
     return data
+
+
+def _filament_by_brand(spools):
+    # Which filament brand is used most: total grams consumed (initial - remaining)
+    # summed across every spool of that brand, ranked high-to-low. Brand totals are
+    # global (the natural reading of "most-used brand"), so no per-makerspace split.
+    totals = {}
+    for spool in spools.only("brand", "initial_weight_grams", "remaining_weight_grams"):
+        brand = (spool.brand or "").strip() or "Unbranded"
+        entry = totals.setdefault(brand, {"grams": Decimal("0"), "spools": 0})
+        entry["grams"] += _spool_grams_used(spool)
+        entry["spools"] += 1
+    rows = [
+        {"brand": brand, "grams_used": _decimal_to_float(data["grams"]), "spools": data["spools"]}
+        for brand, data in totals.items()
+    ]
+    rows.sort(key=lambda row: row["grams_used"], reverse=True)
+    return rows
 
 
 def _top_requesters(requests, include_makerspace):

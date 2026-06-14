@@ -180,6 +180,92 @@ def test_makerspace_printing_report_aggregates_totals_hours_filament_and_periods
     assert counts == sorted(counts, reverse=True)
 
 
+def test_printing_report_filament_by_brand_ranks_usage_and_falls_back_to_unbranded():
+    makerspace = make_space("reports-brand")
+    manager = make_print_manager("reports-brand-manager", makerspace)
+    printer = PrintPrinter.objects.create(makerspace=makerspace, name="Brand rig")
+
+    def spool(brand, initial, remaining):
+        return FilamentSpool.objects.create(
+            makerspace=makerspace,
+            printer=printer,
+            material="PLA",
+            color="black",
+            brand=brand,
+            initial_weight_grams=initial,
+            remaining_weight_grams=remaining,
+        )
+
+    # Polymaker: 400 + 200 = 600g across 2 spools (top). Blank brand -> "Unbranded"
+    # at 200g. eSUN: 100g (lowest). Result is ranked grams-used high-to-low.
+    spool("Polymaker", 1000, 600)
+    spool("Polymaker", 500, 300)
+    spool("eSUN", 1000, 900)
+    spool("", 1000, 800)
+
+    response = authenticated_client(manager).get(makerspace_report_url(makerspace))
+
+    assert response.status_code == 200
+    assert response.data["filament_by_brand"] == [
+        {"brand": "Polymaker", "grams_used": 600.0, "spools": 2},
+        {"brand": "Unbranded", "grams_used": 200.0, "spools": 1},
+        {"brand": "eSUN", "grams_used": 100.0, "spools": 1},
+    ]
+
+
+def test_admin_makerspaces_list_includes_a_print_managers_makerspace():
+    # Regression: the staff switcher lists makerspaces via VIEW_INVENTORY OR
+    # MANAGE_PRINTING. A pure print manager (no VIEW_INVENTORY) must still see
+    # their makerspace, otherwise the React console strands them on "No makerspace".
+    space = make_space("reports-switcher")
+    other = make_space("reports-switcher-other")
+    manager = make_print_manager("reports-switcher-manager", space)
+
+    response = authenticated_client(manager).get("/api/v1/admin/makerspaces")
+
+    assert response.status_code == 200
+    rows = {row["id"]: row for row in response.data}
+    assert space.id in rows
+    assert other.id not in rows
+    # Slim switcher serializer: a print manager must NOT receive the full config
+    # (public_api_key, CORS origins, SMTP host/username) the settings views gate
+    # behind MANAGE_MAKERSPACE.
+    row = rows[space.id]
+    assert set(row) == {"id", "name", "public_code", "slug", "telegram_group_chat_id"}
+    for leaked in ("public_api_key", "cors_allowed_origins", "smtp_host", "smtp_username", "enabled_modules"):
+        assert leaked not in row
+
+
+def test_admin_makerspaces_list_is_slim_only_for_print_only_rows_of_mixed_role_user():
+    # Mixed role: VIEW_INVENTORY in space_a, MANAGE_PRINTING-only in space_b. The
+    # list must show space_a in full but space_b slim — a single serializer choice
+    # for the whole list would leak space_b's config (public_api_key/SMTP/CORS).
+    space_a = make_space("reports-mixed-a")
+    space_b = make_space("reports-mixed-b")
+    user = make_member(
+        "reports-mixed-user",
+        space_a,
+        membership_role=MakerspaceMembership.Role.SPACE_MANAGER,
+        role=User.Role.SPACE_MANAGER,
+    )
+    MakerspaceMembership.objects.create(
+        user=user,
+        makerspace=space_b,
+        role=MakerspaceMembership.Role.PRINT_MANAGER,
+    )
+
+    response = authenticated_client(user).get("/api/v1/admin/makerspaces")
+
+    assert response.status_code == 200
+    rows = {row["id"]: row for row in response.data}
+    assert set(rows) == {space_a.id, space_b.id}
+    # Full row for the VIEW_INVENTORY makerspace.
+    assert "public_api_key" in rows[space_a.id]
+    # Slim row for the print-only makerspace — no leaked config.
+    assert set(rows[space_b.id]) == {"id", "name", "public_code", "slug", "telegram_group_chat_id"}
+    assert "public_api_key" not in rows[space_b.id]
+
+
 def test_makerspace_printing_report_requires_manage_printing_scope():
     own_space = make_space("reports-scope-own")
     other_space = make_space("reports-scope-other")
