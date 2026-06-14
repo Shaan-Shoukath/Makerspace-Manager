@@ -45,6 +45,7 @@ from apps.printing.models import (
     PrintPrinter,
     PrintRequest,
 )
+from apps.procurement.models import ToBuyItem
 
 
 def test_core_models_are_registered_in_django_admin():
@@ -76,6 +77,7 @@ def test_core_models_are_registered_in_django_admin():
         ApiClient,
         AuditLog,
         EvidencePhoto,
+        ToBuyItem,
         User,
     }
 

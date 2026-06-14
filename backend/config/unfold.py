@@ -91,6 +91,13 @@ UNFOLD = {
                 ],
             },
             {
+                "title": _("Procurement"),
+                "separator": True,
+                "items": [
+                    _item("To-buy list", "shopping_cart", "admin:procurement_tobuyitem_changelist"),
+                ],
+            },
+            {
                 "title": _("3D printing"),
                 "separator": True,
                 "items": [

@@ -5,6 +5,7 @@ export { Inventory } from "./panels/Inventory";
 export { Ledger } from "./panels/Ledger";
 export { OperationsReports } from "./panels/OperationsReports";
 export { PrintingPanel } from "./panels/PrintingPanel";
+export { ProcurementPanel } from "./panels/ProcurementPanel";
 export { QrTools } from "./panels/QrTools";
 export { Queues } from "./panels/Queues";
 export { StocktakePanel } from "./panels/StocktakePanel";

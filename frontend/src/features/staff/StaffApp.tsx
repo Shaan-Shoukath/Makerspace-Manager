@@ -15,6 +15,7 @@ import {
   OperationsReports,
   Panel,
   PrintingPanel,
+  ProcurementPanel,
   QrTools,
   Queues,
   StocktakePanel,
@@ -33,13 +34,14 @@ type AuthUser = {
 };
 
 const ALL_TABS = [
-  "queues", "direct", "inventory", "categories", "printing", "transfers",
+  "queues", "direct", "inventory", "categories", "printing", "tobuy", "transfers",
   "stocktake", "ledger", "reports", "bulk", "qr", "api", "users", "audit",
 ] as const;
 // Membership roles that get the full staff console. Anything else (print_manager,
 // or an unknown role) is failed closed to the 3D-printing surfaces only.
 const FULL_ACCESS_ROLES = ["space_manager", "inventory_manager", "guest_admin"];
-const PRINTING_TABS = ["printing", "reports"];
+// Print managers also get a To-Buy list (their items are auto-tagged "printing").
+const PRINTING_TABS = ["printing", "tobuy", "reports"];
 
 export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
   const queryClient = useQueryClient();
@@ -112,8 +114,17 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
   // print managers + unknown roles get the 3D-printing surfaces only.
   const activeRole = user.makerspaces.find((item) => item.id === selected)?.role;
   const fullAccess = isSuperadmin || (!!activeRole && FULL_ACCESS_ROLES.includes(activeRole));
-  const allowedTabs: readonly string[] = fullAccess ? ALL_TABS : PRINTING_TABS;
   const printingOnly = !fullAccess;
+  // To-Buy access mirrors the backend matrix: superadmin + space/inventory/print
+  // managers. Guest admins (and unknown roles) have none, so hide the tab for them
+  // rather than render an empty list whose actions 403.
+  const canUseToBuy = isSuperadmin || ["space_manager", "inventory_manager", "print_manager"].includes(activeRole ?? "");
+  const allowedTabs: readonly string[] = (fullAccess ? ALL_TABS : PRINTING_TABS).filter(
+    (tabName) => tabName !== "tobuy" || canUseToBuy,
+  );
+  // Only the makerspace admin (Space Manager) + superadmin may pick which stream
+  // (hardware/printing) a To-Buy item goes to; other roles are auto-tagged.
+  const canChooseToBuyKind = isSuperadmin || activeRole === "space_manager";
   // Derived (no useEffect): switching makerspace recomputes synchronously, and a
   // tab that isn't allowed for the current role falls back to the first allowed.
   const activeTab = allowedTabs.includes(tab) ? tab : allowedTabs[0];
@@ -153,7 +164,7 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
                 }`}
                 onClick={() => setTab(item)}
               >
-                  {item === "qr" ? "QR Tools" : item === "direct" ? "Direct handout" : item === "api" ? "API clients" : item === "stocktake" ? "Stocktake" : item === "printing" ? "3D Printing" : item[0].toUpperCase() + item.slice(1)}
+                  {item === "qr" ? "QR Tools" : item === "direct" ? "Direct handout" : item === "api" ? "API clients" : item === "stocktake" ? "Stocktake" : item === "printing" ? "3D Printing" : item === "tobuy" ? "To Buy" : item[0].toUpperCase() + item.slice(1)}
               </button>
             ))}
           </nav>
@@ -203,6 +214,9 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
           ) : null}
           {activeMakerspace && activeTab === "printing" ? (
             <PrintingPanel makerspace={activeMakerspace} />
+          ) : null}
+          {activeMakerspace && activeTab === "tobuy" ? (
+            <ProcurementPanel makerspace={activeMakerspace} canChooseKind={canChooseToBuyKind} />
           ) : null}
           {activeMakerspace && activeTab === "transfers" ? (
             <StockTransferPanel

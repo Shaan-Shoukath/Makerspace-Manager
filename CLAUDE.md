@@ -297,6 +297,20 @@ cd backend && pytest
   `permissions.py` provides `CanManagePrinting` action-aware 403/404; `emails.py`
   sends fail-safe branded SMTP notifications. Templates in
   `backend/templates/email/`.
+- `backend/apps/procurement/` — per-makerspace **"To Buy" / shopping list**
+  (`ToBuyItem`: name, quantity, link, status pending|bought, estimated_unit_cost,
+  `kind` hardware|printing). The stream is decided **server-side from the actor's
+  role** (`access.derive_kind`), never trusted from the client: print managers'
+  items are auto-tagged `printing`, Space/Inventory managers' are `hardware`; a
+  makerspace admin (`MANAGE_MAKERSPACE`) / superadmin may target either. Visibility
+  (`access.viewable_kinds`) follows the same matrix — Space Manager + Superadmin see
+  BOTH streams, Inventory Manager sees hardware, Print Manager sees printing. No new
+  RBAC action: it reuses `MANAGE_MAKERSPACE`/`EDIT_INVENTORY`/`MANAGE_PRINTING`.
+  `views.py` is list/create + detail (404-before-403 across tenant+stream) + CSV
+  export, all `@extend_schema`-documented; mounted at `/api/v1/procurement/`.
+  Registered in the superadmin Django admin (Procurement sidebar group). Frontend:
+  `ProcurementPanel.tsx` ("To Buy" tab; print managers get it in their printing-only
+  nav; admins get a hardware/printing selector + CSV export).
 - `backend/apps/hardware_requests/` — Hardware Request Workflow (submit + accept/reject + issue + return): `HardwareRequest`/`HardwareRequestItem`, the `HardwareRequestItemAsset` through model (per-unit issue/return links for individual-mode handouts, in `asset_link_models.py`), immutable `ReturnEvent`, and immutable `RequesterAccountability` models; `workflow.py` (single source of truth: `submit_request`/`accept_request`/`reject_request`/`assign_box`/`issue_request`/`return_items`, atomic + row-locked + audited; reserve-at-acceptance); `permissions.py` (`CanReviewRequest`, `CanViewHandoverQueue`, `CanReturnRequest`); `serializers.py` (strict public-status allowlist plus return item resolutions); `views.py` (public submit/verify/status under HMAC-protected `public/`; admin queues + accept/reject/assign-box/issue/return with 404-before-403 scoping); `exceptions.py` (workflow→HTTP exception handler + `ErrorSerializer`); `notifications.py` (Telegram seam); `urls.py`, `admin.py`.
 - `backend/apps/hardware_requests/management/commands/send_return_reminders.py`
   — scheduled email reminder job. Run from cron/Task Scheduler; it only sends

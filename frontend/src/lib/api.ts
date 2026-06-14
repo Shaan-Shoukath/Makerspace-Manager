@@ -131,6 +131,11 @@ export async function staffRequest<T>(
     const body = await response.json().catch(() => ({}));
     throw new Error(body.detail ?? `Request failed (${response.status})`);
   }
+  // 204 No Content (e.g. DRF destroy) has an empty body — parsing it as JSON
+  // would throw and surface a successful mutation as a failure.
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return (await response.json()) as T;
 }
 

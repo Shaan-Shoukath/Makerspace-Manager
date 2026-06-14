@@ -33,6 +33,7 @@ DEFAULT_ENABLED_MODULES = [
     "reports",
     "qr_print_batches",
     "asset_units",
+    "procurement",
 ]
 
 
