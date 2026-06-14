@@ -39,9 +39,18 @@ class PrintingReportPeriodsSerializer(serializers.Serializer):
     by_hour = PrintingReportPeriodSerializer(many=True)
 
 
+class PrintingReportTopRequesterSerializer(serializers.Serializer):
+    requester_id = serializers.IntegerField()
+    requester = serializers.CharField()
+    requests = serializers.IntegerField()
+    items = serializers.IntegerField()
+    makerspace_id = serializers.IntegerField(required=False)
+
+
 class PrintingReportSerializer(serializers.Serializer):
     totals = PrintingReportTotalsSerializer()
     printer_hours = PrintingReportPrinterHoursSerializer(many=True)
     filament_used = PrintingReportFilamentUsedSerializer(many=True)
+    top_requesters = PrintingReportTopRequesterSerializer(many=True)
     total_grams_used = serializers.FloatField()
     filament_estimated_by_period = PrintingReportPeriodsSerializer()

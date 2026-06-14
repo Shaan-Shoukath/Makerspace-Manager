@@ -172,6 +172,12 @@ def test_makerspace_printing_report_aggregates_totals_hours_filament_and_periods
         {"period": "2026-05-01 10:00", "grams": 200.5},
         {"period": "2026-05-02 11:00", "grams": 40.0},
     ]
+    # Top requesters: who submits the most print jobs, ranked high-to-low.
+    requesters = response.data["top_requesters"]
+    assert requesters, "top_requesters should not be empty"
+    assert {"requester", "requests", "items"} <= set(requesters[0].keys())
+    counts = [row["requests"] for row in requesters]
+    assert counts == sorted(counts, reverse=True)
 
 
 def test_makerspace_printing_report_requires_manage_printing_scope():

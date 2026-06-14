@@ -39,6 +39,13 @@ type PrintingReport = {
     remaining_grams: number;
     makerspace_id?: number;
   }[];
+  top_requesters: {
+    requester_id: number;
+    requester: string;
+    requests: number;
+    items: number;
+    makerspace_id?: number;
+  }[];
   total_grams_used: number;
   filament_estimated_by_period: {
     by_month: { period: string; grams: number }[];
@@ -229,6 +236,29 @@ export function OperationsReports({ makerspace, isSuperadmin }: { makerspace: Ma
                         aggregate
                           ? [row.makerspace_id ?? "", row.material, row.color, row.grams_used, row.remaining_grams]
                           : [row.material, row.color, row.grams_used, row.remaining_grams],
+                      ),
+                    ],
+                  }}
+                />
+              </div>
+              <div>
+                <h3 className="mb-2 text-sm font-semibold text-ink">Top requesters</h3>
+                <BarChart
+                  rows={(printing.data?.top_requesters ?? [])
+                    .slice(0, 8)
+                    .map((row) => ({ label: row.requester, value: row.requests }))}
+                  valueLabel=" reqs"
+                />
+                <ReportTable
+                  data={{
+                    rows: [
+                      aggregate
+                        ? ["makerspace_id", "requester", "requests", "items"]
+                        : ["requester", "requests", "items"],
+                      ...(printing.data?.top_requesters ?? []).map((row) =>
+                        aggregate
+                          ? [row.makerspace_id ?? "", row.requester, row.requests, row.items]
+                          : [row.requester, row.requests, row.items],
                       ),
                     ],
                   }}

@@ -27,6 +27,7 @@ def build_printing_report(makerspace_id=None, *, include_makerspace=False):
         "totals": _totals(requests),
         "printer_hours": _printer_hours(requests, include_makerspace),
         "filament_used": _filament_used(spools, include_makerspace),
+        "top_requesters": _top_requesters(requests, include_makerspace),
         "total_grams_used": _total_spool_grams_used(spools),
         "filament_estimated_by_period": {
             "by_month": _estimated_filament_by_period(requests, TruncMonth, "%Y-%m"),
@@ -77,6 +78,32 @@ def _printer_hours(requests, include_makerspace):
         }
         if include_makerspace:
             item["makerspace_id"] = row["printer__makerspace_id"]
+        data.append(item)
+    return data
+
+
+def _top_requesters(requests, include_makerspace):
+    # Who submits the most 3D-print jobs: request count + total quantity per requester,
+    # ranked high-to-low. In aggregate mode each row is per requester+makerspace
+    # (mirrors printer_hours/filament_used).
+    values = ["requester_id", "requester__username"]
+    if include_makerspace:
+        values.append("bucket__makerspace_id")
+    rows = (
+        requests.values(*values)
+        .annotate(request_count=Count("id"), items=Sum("quantity"))
+        .order_by("-request_count", "-items")
+    )
+    data = []
+    for row in rows:
+        item = {
+            "requester_id": row["requester_id"],
+            "requester": row["requester__username"],
+            "requests": row["request_count"],
+            "items": row["items"] or 0,
+        }
+        if include_makerspace:
+            item["makerspace_id"] = row["bucket__makerspace_id"]
         data.append(item)
     return data
 

@@ -11224,6 +11224,12 @@
                             "$ref": "#/components/schemas/PrintingReportFilamentUsed"
                         }
                     },
+                    "top_requesters": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PrintingReportTopRequester"
+                        }
+                    },
                     "total_grams_used": {
                         "type": "number",
                         "format": "double"
@@ -11236,6 +11242,7 @@
                     "filament_estimated_by_period",
                     "filament_used",
                     "printer_hours",
+                    "top_requesters",
                     "total_grams_used",
                     "totals"
                 ]
@@ -11341,6 +11348,32 @@
                     "hours",
                     "printer_id",
                     "printer_name"
+                ]
+            },
+            "PrintingReportTopRequester": {
+                "type": "object",
+                "properties": {
+                    "requester_id": {
+                        "type": "integer"
+                    },
+                    "requester": {
+                        "type": "string"
+                    },
+                    "requests": {
+                        "type": "integer"
+                    },
+                    "items": {
+                        "type": "integer"
+                    },
+                    "makerspace_id": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "items",
+                    "requester",
+                    "requester_id",
+                    "requests"
                 ]
             },
             "PrintingReportTotals": {
