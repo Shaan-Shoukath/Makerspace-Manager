@@ -34,6 +34,9 @@ class ApiClientAdminForm(forms.ModelForm):
     smtp_use_tls = forms.BooleanField(
         required=False, widget=UnfoldBooleanSwitchWidget
     )
+    smtp_use_ssl = forms.BooleanField(
+        required=False, widget=UnfoldBooleanSwitchWidget
+    )
     smtp_from_email = forms.EmailField(
         required=False, widget=UnfoldAdminEmailInputWidget
     )
@@ -52,6 +55,7 @@ class ApiClientAdminForm(forms.ModelForm):
                 "smtp_port",
                 "smtp_username",
                 "smtp_use_tls",
+                "smtp_use_ssl",
                 "smtp_from_email",
             ):
                 self.fields[field].initial = getattr(makerspace, field)
@@ -99,6 +103,7 @@ class ApiClientAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
         "smtp_username",
         "smtp_password",
         "smtp_use_tls",
+        "smtp_use_ssl",
         "smtp_from_email",
         "client_id",
         "makerspace_public_code",
@@ -153,6 +158,7 @@ class ApiClientAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
             makerspace.set_smtp_password(form.cleaned_data["smtp_password"])
         makerspace.smtp_port = form.cleaned_data.get("smtp_port") or 587
         makerspace.smtp_use_tls = bool(form.cleaned_data.get("smtp_use_tls"))
+        makerspace.smtp_use_ssl = bool(form.cleaned_data.get("smtp_use_ssl"))
         makerspace.save(
             update_fields=[
                 *text_fields,
@@ -160,6 +166,7 @@ class ApiClientAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
                 "smtp_password",
                 "smtp_port",
                 "smtp_use_tls",
+                "smtp_use_ssl",
                 "updated_at",
             ]
         )

@@ -40,6 +40,7 @@ class MakerspaceSerializer(serializers.ModelSerializer):
             "smtp_password",
             "smtp_password_set",
             "smtp_use_tls",
+            "smtp_use_ssl",
             "smtp_from_email",
             "default_loan_days",
             "created_at",

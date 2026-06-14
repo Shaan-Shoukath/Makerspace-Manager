@@ -91,6 +91,10 @@ class Makerspace(models.Model):
     smtp_username = models.CharField(max_length=200, blank=True)
     smtp_password = models.CharField(max_length=200, blank=True)
     smtp_use_tls = models.BooleanField(default=True)
+    # Implicit SSL (port 465). Mutually exclusive with STARTTLS (smtp_use_tls):
+    # when set, the mail connection ignores use_tls. Lets a makerspace use a
+    # 465-only provider (e.g. Gmail implicit SSL) instead of STARTTLS on 587.
+    smtp_use_ssl = models.BooleanField(default=False)
     smtp_from_email = models.EmailField(blank=True)
     default_loan_days = models.PositiveIntegerField(default=7)
     created_by = models.ForeignKey(

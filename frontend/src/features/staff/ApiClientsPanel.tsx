@@ -26,6 +26,7 @@ type ApiSettings = {
   smtp_username: string;
   smtp_password_set: boolean;
   smtp_use_tls: boolean;
+  smtp_use_ssl: boolean;
   smtp_from_email: string;
 };
 type ApiSettingsForm = {
@@ -36,6 +37,7 @@ type ApiSettingsForm = {
   smtp_username: string;
   smtp_password: string;
   smtp_use_tls: boolean;
+  smtp_use_ssl: boolean;
   smtp_from_email: string;
 };
 
@@ -54,6 +56,7 @@ export function ApiClientsPanel({ makerspace }: { makerspace: Makerspace }) {
     smtp_username: "",
     smtp_password: "",
     smtp_use_tls: true,
+    smtp_use_ssl: false,
     smtp_from_email: "",
   });
   const clients = useStaffGet<{ results: ApiClient[] }>(
@@ -74,6 +77,7 @@ export function ApiClientsPanel({ makerspace }: { makerspace: Makerspace }) {
       smtp_username: settings.data.smtp_username ?? "",
       smtp_password: "",
       smtp_use_tls: settings.data.smtp_use_tls,
+      smtp_use_ssl: settings.data.smtp_use_ssl,
       smtp_from_email: settings.data.smtp_from_email ?? "",
     });
   }, [settings.data]);
@@ -160,10 +164,16 @@ export function ApiClientsPanel({ makerspace }: { makerspace: Makerspace }) {
               <input className="desk-input" placeholder={settings.data?.smtp_password_set ? "SMTP password set" : "SMTP password"} type="password" value={settingsForm.smtp_password} onChange={(event) => setSettingsForm({ ...settingsForm, smtp_password: event.target.value })} />
               <input className="desk-input sm:col-span-2" placeholder="SMTP from email" value={settingsForm.smtp_from_email} onChange={(event) => setSettingsForm({ ...settingsForm, smtp_from_email: event.target.value })} />
             </div>
-            <label className="mt-3 flex items-center gap-2 text-sm text-muted">
-              <input type="checkbox" checked={settingsForm.smtp_use_tls} onChange={(event) => setSettingsForm({ ...settingsForm, smtp_use_tls: event.target.checked })} />
-              Use SMTP TLS
-            </label>
+            <div className="mt-3 flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 text-sm text-muted">
+                <input type="checkbox" checked={settingsForm.smtp_use_tls} onChange={(event) => setSettingsForm({ ...settingsForm, smtp_use_tls: event.target.checked })} />
+                Use STARTTLS (587)
+              </label>
+              <label className="flex items-center gap-2 text-sm text-muted">
+                <input type="checkbox" checked={settingsForm.smtp_use_ssl} onChange={(event) => setSettingsForm({ ...settingsForm, smtp_use_ssl: event.target.checked })} />
+                Use implicit SSL (465)
+              </label>
+            </div>
             <button className="desk-button-primary mt-3 w-full" disabled={saveSettings.isPending} onClick={() => saveSettings.mutate()}>
               {saveSettings.isPending ? "Saving..." : "Save integration settings"}
             </button>
@@ -279,6 +289,7 @@ function settingsPayload(form: ApiSettingsForm) {
     smtp_port: Number(form.smtp_port) || 587,
     smtp_username: form.smtp_username,
     smtp_use_tls: form.smtp_use_tls,
+    smtp_use_ssl: form.smtp_use_ssl,
     smtp_from_email: form.smtp_from_email,
   };
   if (form.telegram_bot_token) payload.telegram_bot_token = form.telegram_bot_token;
