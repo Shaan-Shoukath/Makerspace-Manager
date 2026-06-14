@@ -18,24 +18,15 @@ def _is_active_superuser(request):
     )
 
 
-def _can_view_makerspaces(request):
-    return _is_active_superuser(request)
-
-
-def _can_view_products(request):
-    return _is_active_superuser(request)
-
-
-def _can_view_users(request):
-    return _is_active_superuser(request)
-
-
-def _can_view_groups(request):
-    return _is_active_superuser(request)
-
-
-def _can_view_api_clients(request):
-    return _is_active_superuser(request)
+def _item(title, icon, route):
+    # Every admin model is superadmin-only (U-SEC), so a single permission gate
+    # applies to the whole sidebar.
+    return {
+        "title": _(title),
+        "icon": icon,
+        "link": reverse_lazy(route),
+        "permission": _is_active_superuser,
+    }
 
 
 UNFOLD = {
@@ -67,52 +58,71 @@ UNFOLD = {
                 "title": _("Inventory"),
                 "separator": True,
                 "items": [
-                    {
-                        "title": _("Makerspaces"),
-                        "icon": "store",
-                        "link": reverse_lazy("admin:makerspaces_makerspace_changelist"),
-                        "permission": _can_view_makerspaces,
-                    },
-                    {
-                        "title": _("Inventory"),
-                        "icon": "inventory_2",
-                        "link": reverse_lazy(
-                            "admin:inventory_inventoryproduct_changelist"
-                        ),
-                        "permission": _can_view_products,
-                    },
+                    _item("Makerspaces", "store", "admin:makerspaces_makerspace_changelist"),
+                    _item("Inventory", "inventory_2", "admin:inventory_inventoryproduct_changelist"),
+                    _item("Categories", "category", "admin:inventory_category_changelist"),
+                    _item("Asset units", "qr_code_2", "admin:inventory_inventoryasset_changelist"),
+                    _item("Containers", "package_2", "admin:boxes_box_changelist"),
+                    _item("Inventory adjustments", "tune", "admin:operations_inventoryadjustment_changelist"),
                 ],
             },
             {
-                "title": _("Accounts"),
+                "title": _("Requests & loans"),
                 "separator": True,
                 "items": [
-                    {
-                        "title": _("Users"),
-                        "icon": "person",
-                        "link": reverse_lazy("admin:accounts_user_changelist"),
-                        "permission": _can_view_users,
-                    },
-                    {
-                        "title": _("Groups"),
-                        "icon": "groups",
-                        "link": reverse_lazy("admin:auth_group_changelist"),
-                        "permission": _can_view_groups,
-                    },
+                    _item("Hardware requests", "assignment", "admin:hardware_requests_hardwarerequest_changelist"),
+                    _item("Tool loans", "outbound", "admin:hardware_requests_publictoolloan_changelist"),
+                    _item("Return events", "assignment_return", "admin:hardware_requests_returnevent_changelist"),
+                    _item("Accountability", "gavel", "admin:hardware_requests_requesteraccountability_changelist"),
+                    _item("Issued asset links", "link", "admin:hardware_requests_hardwarerequestitemasset_changelist"),
+                    _item("Email templates", "mail", "admin:hardware_requests_hardwareemailtemplate_changelist"),
+                ],
+            },
+            {
+                "title": _("Operations"),
+                "separator": True,
+                "items": [
+                    _item("Stock transfers", "swap_horiz", "admin:operations_stocktransfer_changelist"),
+                    _item("Stocktakes", "fact_check", "admin:operations_stocktakesession_changelist"),
+                    _item("QR print batches", "print", "admin:operations_qrprintbatch_changelist"),
+                    _item("QR codes", "qr_code", "admin:boxes_qrcode_changelist"),
+                    _item("QR scans", "barcode_reader", "admin:boxes_qrscanevent_changelist"),
+                    _item("Box scans", "qr_code_scanner", "admin:boxes_boxscan_changelist"),
+                ],
+            },
+            {
+                "title": _("3D printing"),
+                "separator": True,
+                "items": [
+                    _item("Print buckets", "folder", "admin:printing_printbucket_changelist"),
+                    _item("Print requests", "deployed_code", "admin:printing_printrequest_changelist"),
+                    _item("Printers", "precision_manufacturing", "admin:printing_printprinter_changelist"),
+                    _item("Filament spools", "fiber_smart_record", "admin:printing_filamentspool_changelist"),
+                ],
+            },
+            {
+                "title": _("Accounts & access"),
+                "separator": True,
+                "items": [
+                    _item("Users", "person", "admin:accounts_user_changelist"),
+                    _item("Staff memberships", "badge", "admin:makerspaces_makerspacemembership_changelist"),
+                    _item("Groups", "groups", "admin:auth_group_changelist"),
                 ],
             },
             {
                 "title": _("Integrations"),
                 "separator": True,
                 "items": [
-                    {
-                        "title": _("API Clients"),
-                        "icon": "vpn_key",
-                        "link": reverse_lazy(
-                            "admin:apiclients_apiclient_changelist"
-                        ),
-                        "permission": _can_view_api_clients,
-                    },
+                    _item("API clients", "vpn_key", "admin:apiclients_apiclient_changelist"),
+                    _item("Tenant frontends", "devices", "admin:makerspaces_tenantfrontend_changelist"),
+                ],
+            },
+            {
+                "title": _("Audit & evidence"),
+                "separator": True,
+                "items": [
+                    _item("Audit log", "history", "admin:audit_auditlog_changelist"),
+                    _item("Evidence photos", "photo_library", "admin:evidence_evidencephoto_changelist"),
                 ],
             },
         ],

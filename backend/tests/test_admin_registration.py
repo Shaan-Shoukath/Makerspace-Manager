@@ -1,6 +1,22 @@
 from types import SimpleNamespace
 
 from django.contrib import admin
+from django.urls import NoReverseMatch
+
+from config.unfold import UNFOLD
+
+
+def test_unfold_sidebar_links_all_resolve():
+    """Every curated Unfold sidebar link must point at a registered admin route,
+    or the whole admin sidebar breaks with NoReverseMatch at render."""
+    broken = []
+    for group in UNFOLD["SIDEBAR"]["navigation"]:
+        for item in group["items"]:
+            try:
+                str(item["link"])  # force the lazy reverse
+            except NoReverseMatch:
+                broken.append(str(item["title"]))
+    assert broken == []
 
 from apps.accounts.models import User
 from apps.apiclients.models import ApiClient
