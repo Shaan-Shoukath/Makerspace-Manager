@@ -42,9 +42,15 @@ def add_qr_to_batch(batch, qr, label_text="", sort_order=None):
 
 def apply_stock_transfer(actor, makerspace, data):
     with transaction.atomic():
-        source = _container(data.get("source_container_id"), makerspace.id)
-        destination = _container(data.get("destination_container_id"), makerspace.id)
         destination_makerspace_id = data.get("destination_makerspace_id") or makerspace.id
+        is_cross = destination_makerspace_id != makerspace.id
+        source = _container(data.get("source_container_id"), makerspace.id)
+        # For a cross-makerspace move the destination container lives in the
+        # destination makerspace; intra-makerspace keeps it in the same one.
+        destination = _container(
+            data.get("destination_container_id"),
+            destination_makerspace_id if is_cross else makerspace.id,
+        )
         transfer = StockTransfer.objects.create(
             makerspace=makerspace,
             source_container=source,
@@ -56,51 +62,144 @@ def apply_stock_transfer(actor, makerspace, data):
             applied_at=timezone.now(),
         )
         for line_data in data["lines"]:
-            product = None
-            asset = None
-            quantity = line_data.get("quantity") or 1
-            if line_data.get("asset_id"):
-                asset = InventoryAsset.objects.select_for_update().select_related("product").get(
-                    pk=line_data["asset_id"],
-                    makerspace=makerspace,
+            if is_cross:
+                _apply_cross_makerspace_line(
+                    actor, transfer, makerspace, destination_makerspace_id, destination, line_data
                 )
-                if source and asset.box_id != source.id:
-                    raise ValidationError({"asset_id": "Asset is not in the source container."})
-                asset.box = destination
-                if line_data.get("to_status"):
-                    asset.status = line_data["to_status"]
-                asset.save(update_fields=["box", "status", "updated_at"])
-                product = asset.product
             else:
-                product = InventoryProduct.objects.select_for_update().get(
-                    pk=line_data["product_id"],
-                    makerspace=makerspace,
+                _apply_intra_makerspace_line(
+                    actor, transfer, makerspace, source, destination, line_data
                 )
-                if source and product.box_id != source.id:
-                    raise ValidationError({"product_id": "Product is not in the source container."})
-                if quantity > product.total_quantity:
-                    raise ValidationError({"quantity": "Cannot transfer more than total stock."})
-                product.box = destination
-                product.save(update_fields=["box", "updated_at"])
-            StockTransferLine.objects.create(
-                transfer=transfer,
-                product=None if asset else product,
-                asset=asset,
-                quantity=quantity,
-                from_status=line_data.get("from_status", ""),
-                to_status=line_data.get("to_status", ""),
-                notes=line_data.get("notes", ""),
-            )
-            InventoryAdjustment.objects.create(
-                makerspace=makerspace,
-                transfer=transfer,
-                product=None if asset else product,
-                asset=asset,
-                reason=data["reason"],
-                created_by=actor,
-            )
         audit.record(actor, "stock_transfer.applied", makerspace=makerspace, target=transfer)
         return transfer
+
+
+def _apply_intra_makerspace_line(actor, transfer, makerspace, source, destination, line_data):
+    """Relocate a product/asset between containers within one makerspace."""
+    product = None
+    asset = None
+    quantity = line_data.get("quantity") or 1
+    if line_data.get("asset_id"):
+        asset = InventoryAsset.objects.select_for_update().select_related("product").get(
+            pk=line_data["asset_id"],
+            makerspace=makerspace,
+        )
+        if source and asset.box_id != source.id:
+            raise ValidationError({"asset_id": "Asset is not in the source container."})
+        asset.box = destination
+        if line_data.get("to_status"):
+            asset.status = line_data["to_status"]
+        asset.save(update_fields=["box", "status", "updated_at"])
+        product = asset.product
+    else:
+        product = InventoryProduct.objects.select_for_update().get(
+            pk=line_data["product_id"],
+            makerspace=makerspace,
+        )
+        if source and product.box_id != source.id:
+            raise ValidationError({"product_id": "Product is not in the source container."})
+        if quantity > product.total_quantity:
+            raise ValidationError({"quantity": "Cannot transfer more than total stock."})
+        product.box = destination
+        product.save(update_fields=["box", "updated_at"])
+    StockTransferLine.objects.create(
+        transfer=transfer,
+        product=None if asset else product,
+        asset=asset,
+        quantity=quantity,
+        from_status=line_data.get("from_status", ""),
+        to_status=line_data.get("to_status", ""),
+        notes=line_data.get("notes", ""),
+    )
+    InventoryAdjustment.objects.create(
+        makerspace=makerspace,
+        transfer=transfer,
+        product=None if asset else product,
+        asset=asset,
+        reason=transfer.reason,
+        created_by=actor,
+    )
+
+
+def _apply_cross_makerspace_line(
+    actor, transfer, source_makerspace, dest_makerspace_id, dest_container, line_data
+):
+    """Actually move available quantity stock from one makerspace to another.
+
+    Quantity is decremented on the source product and credited to a find-or-create
+    product (matched by name) in the destination makerspace. Individual-tracked
+    products / explicit asset lines are rejected: relocating serialized units also
+    means re-scoping their asset rows + QR codes across tenants, which is out of
+    scope here — move quantity stock instead."""
+    if line_data.get("asset_id"):
+        raise ValidationError(
+            {"asset_id": "Individual asset units cannot be moved across makerspaces; transfer quantity stock instead."}
+        )
+    quantity = line_data.get("quantity") or 1
+    src = InventoryProduct.objects.select_for_update().get(
+        pk=line_data["product_id"],
+        makerspace=source_makerspace,
+    )
+    if src.tracking_mode == TrackingMode.INDIVIDUAL:
+        raise ValidationError(
+            {"product_id": "Individual-tracked products cannot be moved across makerspaces yet."}
+        )
+    if quantity > src.available_quantity:
+        raise ValidationError({"quantity": "Cannot transfer more than the available stock."})
+
+    src.available_quantity -= quantity
+    src.total_quantity -= quantity
+    src.save(update_fields=["available_quantity", "total_quantity", "updated_at"])
+
+    dest = (
+        InventoryProduct.objects.select_for_update()
+        .filter(makerspace_id=dest_makerspace_id, name__iexact=src.name)
+        .first()
+    )
+    if dest is None:
+        dest = InventoryProduct.objects.create(
+            makerspace_id=dest_makerspace_id,
+            name=src.name,
+            description=src.description,
+            tracking_mode=TrackingMode.QUANTITY,
+            box=dest_container,
+            total_quantity=0,
+            available_quantity=0,
+            # Don't auto-publish into the destination's public catalog; the
+            # receiving makerspace opts in explicitly.
+            is_public=False,
+        )
+    dest.available_quantity += quantity
+    dest.total_quantity += quantity
+    if dest_container is not None:
+        dest.box = dest_container
+    dest.save(update_fields=["available_quantity", "total_quantity", "box", "updated_at"])
+
+    StockTransferLine.objects.create(
+        transfer=transfer,
+        product=src,
+        asset=None,
+        quantity=quantity,
+        from_status=line_data.get("from_status", ""),
+        to_status=line_data.get("to_status", ""),
+        notes=line_data.get("notes", "") or f"Moved to makerspace #{dest_makerspace_id} product #{dest.id}",
+    )
+    InventoryAdjustment.objects.create(
+        makerspace=source_makerspace,
+        transfer=transfer,
+        product=src,
+        delta_available=-quantity,
+        reason=transfer.reason,
+        created_by=actor,
+    )
+    InventoryAdjustment.objects.create(
+        makerspace_id=dest_makerspace_id,
+        transfer=transfer,
+        product=dest,
+        delta_available=quantity,
+        reason=transfer.reason,
+        created_by=actor,
+    )
 
 
 def create_stocktake(actor, makerspace, data):

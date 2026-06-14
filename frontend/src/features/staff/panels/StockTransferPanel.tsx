@@ -93,11 +93,9 @@ export function StockTransferPanel({
         method: "POST",
         body: JSON.stringify({
           source_container_id: sourceContainerId ? Number(sourceContainerId) : null,
-          // The backend resolves destination_container_id within the SOURCE makerspace,
-          // so a container from a different destination makerspace would 404. Only send a
-          // destination container for intra-makerspace transfers.
-          destination_container_id:
-            !isCrossMakerspace && destinationContainerId ? Number(destinationContainerId) : null,
+          // destination_container_id is resolved within the destination makerspace
+          // (same makerspace for intra-transfers), so it is valid in both modes.
+          destination_container_id: destinationContainerId ? Number(destinationContainerId) : null,
           destination_makerspace_id: isCrossMakerspace ? destinationMakerspaceId : null,
           reason: reason.trim(),
           lines: lineRows.map((line) => ({
@@ -186,16 +184,10 @@ export function StockTransferPanel({
                 </select>
               </Field>
               <Field label="Destination container">
-                {isCrossMakerspace ? (
-                  <p className="rounded-md border border-line bg-surface px-3 py-2 text-xs text-muted">
-                    Container selection applies to same-makerspace transfers only.
-                  </p>
-                ) : (
-                  <select className="desk-input w-full" value={destinationContainerId} disabled={destinationContainers.isLoading} onChange={(event) => setDestinationContainerId(event.target.value)}>
-                    <option value="">No destination container</option>
-                    {destinationContainers.data?.results?.map((box) => <option key={box.id} value={box.id}>{labelForContainer(box)}</option>)}
-                  </select>
-                )}
+                <select className="desk-input w-full" value={destinationContainerId} disabled={destinationContainers.isLoading} onChange={(event) => setDestinationContainerId(event.target.value)}>
+                  <option value="">No destination container</option>
+                  {destinationContainers.data?.results?.map((box) => <option key={box.id} value={box.id}>{labelForContainer(box)}</option>)}
+                </select>
               </Field>
             </div>
 
@@ -222,10 +214,11 @@ export function StockTransferPanel({
               <input className="desk-input w-full" value={reason} placeholder="Why is this stock moving?" onChange={(event) => setReason(event.target.value)} />
             </Field>
             {isCrossMakerspace ? (
-              <p className="mt-4 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">
-                Inter-makerspace transfer: this records an audited transfer between makerspaces.
-                Stock is not automatically relocated across makerspaces — adjust the destination
-                makerspace's inventory separately.
+              <p className="mt-4 rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-accent">
+                Inter-makerspace transfer: the chosen quantity is deducted from this makerspace and
+                credited to a matching product in the destination makerspace (created there if
+                needed, kept private until it opts in). Only available stock can move; individual
+                asset-tracked products are not supported.
               </p>
             ) : null}
             {validationError ? <ErrorText text={validationError} /> : null}

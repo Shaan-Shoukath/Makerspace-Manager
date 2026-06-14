@@ -2,11 +2,83 @@ import pytest
 
 from apps.accounts.models import User
 from apps.boxes.models import Box, QrCode
-from apps.inventory.models import InventoryAsset, TrackingMode
-from apps.operations.models import QrPrintBatch, StockTransfer, StocktakeSession
+from apps.inventory.models import InventoryAsset, InventoryProduct, TrackingMode
+from apps.operations.models import InventoryAdjustment, QrPrintBatch, StockTransfer, StocktakeSession
 from tests.return_helpers import authenticated_client, make_box, make_member, make_product, make_space, make_user
 
 pytestmark = pytest.mark.django_db
+
+
+def _cross_transfer(superadmin, source, dest, product, quantity):
+    return authenticated_client(superadmin).post(
+        f"/api/v1/admin/makerspace/{source.id}/stock-transfers",
+        {
+            "destination_makerspace_id": dest.id,
+            "reason": "Lend to partner space",
+            "lines": [{"product_id": product.id, "quantity": quantity}],
+        },
+        format="json",
+    )
+
+
+def test_cross_makerspace_transfer_moves_quantity_to_destination_product():
+    source = make_space("xfer-src")
+    dest = make_space("xfer-dst")
+    superadmin = make_user("xfer-super", role=User.Role.SUPERADMIN, access_status=User.AccessStatus.ACTIVE)
+    product = make_product(source, name="Soldering Iron", total_quantity=10, available_quantity=10)
+
+    created = _cross_transfer(superadmin, source, dest, product, 4)
+
+    assert created.status_code == 201
+    product.refresh_from_db()
+    assert product.available_quantity == 6 and product.total_quantity == 6
+    moved = InventoryProduct.objects.get(makerspace=dest, name="Soldering Iron")
+    assert moved.available_quantity == 4 and moved.total_quantity == 4
+    assert moved.is_public is False  # destination opts in explicitly
+    assert InventoryAdjustment.objects.filter(makerspace=source, delta_available=-4).exists()
+    assert InventoryAdjustment.objects.filter(makerspace=dest, delta_available=4).exists()
+
+
+def test_cross_makerspace_transfer_rejects_more_than_available():
+    source = make_space("xfer-src2")
+    dest = make_space("xfer-dst2")
+    superadmin = make_user("xfer-super2", role=User.Role.SUPERADMIN, access_status=User.AccessStatus.ACTIVE)
+    product = make_product(source, name="Caliper", total_quantity=3, available_quantity=3)
+
+    response = _cross_transfer(superadmin, source, dest, product, 5)
+
+    assert response.status_code == 400
+    product.refresh_from_db()
+    assert product.available_quantity == 3  # unchanged
+
+
+def test_cross_makerspace_transfer_credits_existing_destination_product():
+    source = make_space("xfer-src3")
+    dest = make_space("xfer-dst3")
+    superadmin = make_user("xfer-super3", role=User.Role.SUPERADMIN, access_status=User.AccessStatus.ACTIVE)
+    product = make_product(source, name="Multimeter", total_quantity=10, available_quantity=10)
+    existing = make_product(dest, name="Multimeter", total_quantity=2, available_quantity=2, is_public=False)
+
+    created = _cross_transfer(superadmin, source, dest, product, 3)
+
+    assert created.status_code == 201
+    existing.refresh_from_db()
+    assert existing.available_quantity == 5 and existing.total_quantity == 5
+    # no duplicate product created in the destination
+    assert InventoryProduct.objects.filter(makerspace=dest, name="Multimeter").count() == 1
+
+
+def test_cross_makerspace_transfer_rejects_individual_tracking():
+    source = make_space("xfer-src4")
+    dest = make_space("xfer-dst4")
+    superadmin = make_user("xfer-super4", role=User.Role.SUPERADMIN, access_status=User.AccessStatus.ACTIVE)
+    product = make_product(
+        source, name="Arduino", total_quantity=5, available_quantity=5, tracking_mode=TrackingMode.INDIVIDUAL
+    )
+
+    response = _cross_transfer(superadmin, source, dest, product, 1)
+
+    assert response.status_code == 400
 
 
 def test_stock_transfer_is_superadmin_only_and_moves_product_container():

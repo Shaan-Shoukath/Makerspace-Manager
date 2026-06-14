@@ -61,8 +61,11 @@ estimated-filament buckets by month/day/hour — and a superadmin "All makerspac
 a **Ledger** panel listing everything currently OUT of inventory and who holds it (reviewed-request
 loans + public self-checkout + admin direct handouts, overdue-flagged, with a superadmin aggregate);
 full **Users** CRUD (add staff by role+makerspace, restrict/restore, superadmin create-makerspace);
-**cross-makerspace stock transfers** (superadmin source/destination selectors + multi-line editable
-quantities; read-only for non-superadmins); a paginated **audit log**; a one-time API-client secret
+**stock transfers** — intra-makerspace moves relocate stock between containers; **makerspace→makerspace
+transfers truly move available quantity** (superadmin only): `operations.services._apply_cross_makerspace_line`
+deducts the source product's available/total and credits a find-or-create destination product (matched
+by name, created private until the destination opts in), recording a dual `InventoryAdjustment`.
+Individual/asset-tracked products can't cross makerspaces (their asset rows + QR scoping are tenant-bound); a paginated **audit log**; a one-time API-client secret
 with copy/dismiss; and a request **status stepper** (Requested→Approved→Collected→Returned) on the
 public request view + staff queues. Backend adds `apps.operations.ledger` + `apps.operations.reports`
 (per-makerspace and superadmin-aggregate analytics/exports) and `apps.printing.reports`
