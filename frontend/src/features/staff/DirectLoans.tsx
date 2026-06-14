@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
+import QrScanner from "../../components/ui/QrScanner";
 import { staffRequest } from "../../lib/api";
 import { Panel, type Makerspace, useStaffGet } from "./StaffPanels";
 
@@ -13,13 +14,29 @@ type DirectLoan = {
   items: { product_name: string; quantity: number }[];
 };
 
+type ProductOption = { id: number; name: string; available_quantity: number };
+type LineDraft = { key: number; productId: string; quantity: string };
+type ScannedPayload = { payload: string; label: string };
+type QrResolveResponse = {
+  target:
+    | { type: "product"; id: number; name: string }
+    | { type: "asset"; id: number; asset_tag: string; product: string; status: string }
+    | { type: "box"; id: number; label: string; code: string };
+};
+
 export function DirectLoans({ makerspace }: { makerspace: Makerspace }) {
   const queryClient = useQueryClient();
   const [identifier, setIdentifier] = useState("");
-  const [productId, setProductId] = useState("");
-  const [quantity, setQuantity] = useState("1");
+  const [lineRows, setLineRows] = useState<LineDraft[]>([{ key: 1, productId: "", quantity: "1" }]);
+  const [nextLineKey, setNextLineKey] = useState(2);
+  const [scanned, setScanned] = useState<ScannedPayload[]>([]);
+  const [showScanner, setShowScanner] = useState(false);
   const [qrPayloads, setQrPayloads] = useState("");
   const [dueAt, setDueAt] = useState("");
+  const products = useStaffGet<{ results: ProductOption[] }>(
+    ["inventory", makerspace.id],
+    `/admin/makerspace/${makerspace.id}/inventory`,
+  );
   const loans = useStaffGet<{ results: DirectLoan[] }>(
     ["direct-loans", makerspace.id],
     `/admin/makerspace/${makerspace.id}/direct-loans`,
@@ -31,16 +48,22 @@ export function DirectLoans({ makerspace }: { makerspace: Makerspace }) {
         body: JSON.stringify({
           identifier,
           due_at: dueAt ? new Date(dueAt).toISOString() : null,
-          qr_payloads: qrPayloads
-            .split("\n")
-            .map((value) => value.trim())
-            .filter(Boolean),
-          items: productId
-            ? [{ product_id: Number(productId), quantity: Number(quantity) }]
-            : [],
+          qr_payloads: Array.from(new Set([
+            ...scanned.map((item) => item.payload),
+            ...qrPayloads.split("\n").map((value) => value.trim()).filter(Boolean),
+          ])),
+          items: lineRows
+            .filter((line) => line.productId)
+            .map((line) => ({ product_id: Number(line.productId), quantity: Number(line.quantity) })),
         }),
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["direct-loans", makerspace.id] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["direct-loans", makerspace.id] });
+      setLineRows([{ key: 1, productId: "", quantity: "1" }]);
+      setNextLineKey(2);
+      setScanned([]);
+      setQrPayloads("");
+    },
   });
   const returnLoan = useMutation({
     mutationFn: (loanId: number) =>
@@ -50,6 +73,38 @@ export function DirectLoans({ makerspace }: { makerspace: Makerspace }) {
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["direct-loans", makerspace.id] }),
   });
+  const addLine = () => {
+    setLineRows((rows) => [...rows, { key: nextLineKey, productId: "", quantity: "1" }]);
+    setNextLineKey((key) => key + 1);
+  };
+  const updateLine = (key: number, patch: Partial<LineDraft>) => {
+    setLineRows((rows) => rows.map((line) => (line.key === key ? { ...line, ...patch } : line)));
+  };
+  const removeLine = (key: number) => {
+    setLineRows((rows) => rows.filter((line) => line.key !== key));
+  };
+  const removeScanned = (payload: string) => {
+    setScanned((items) => items.filter((item) => item.payload !== payload));
+  };
+  const handleScan = async (payload: string) => {
+    const cleanPayload = payload.trim();
+    if (!cleanPayload || scanned.some((item) => item.payload === cleanPayload)) return;
+    let label = cleanPayload;
+    try {
+      const result = await staffRequest<QrResolveResponse>("/admin/qr/resolve", {
+        method: "POST",
+        body: JSON.stringify({ payload: cleanPayload }),
+      });
+      label = labelForTarget(result.target, cleanPayload);
+    } catch {
+      label = cleanPayload;
+    }
+    setScanned((items) =>
+      items.some((item) => item.payload === cleanPayload)
+        ? items
+        : [...items, { payload: cleanPayload, label }],
+    );
+  };
 
   return (
     <div className="grid gap-4">
@@ -57,8 +112,44 @@ export function DirectLoans({ makerspace }: { makerspace: Makerspace }) {
         <div className="grid gap-3 md:grid-cols-2">
           <input className="desk-input" placeholder="Check-In username, email, phone, or ID" value={identifier} onChange={(e) => setIdentifier(e.target.value)} />
           <input className="desk-input" type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
-          <input className="desk-input" placeholder="Product ID for manual item" value={productId} onChange={(e) => setProductId(e.target.value)} />
-          <input className="desk-input" placeholder="Quantity" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+        </div>
+        <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-ink">Items</h3>
+            <button className="desk-button" type="button" onClick={addLine}>Add item</button>
+          </div>
+          <div className="grid gap-2">
+            {lineRows.map((line) => (
+              <div key={line.key} className="grid gap-2 md:grid-cols-[1fr_120px_auto]">
+                <select className="desk-input" value={line.productId} disabled={products.isLoading} onChange={(e) => updateLine(line.key, { productId: e.target.value })}>
+                  <option value="">Product</option>
+                  {products.data?.results?.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.name} ({product.available_quantity} available)
+                    </option>
+                  ))}
+                </select>
+                <input className="desk-input" min={1} inputMode="numeric" type="number" value={line.quantity} onChange={(e) => updateLine(line.key, { quantity: e.target.value })} />
+                <button className="desk-button" type="button" onClick={() => removeLine(line.key)}>Remove</button>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-ink">QR payloads</h3>
+            <button className="desk-button" type="button" onClick={() => setShowScanner(true)}>Scan QR</button>
+          </div>
+          {scanned.length ? (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {scanned.map((item) => (
+                <span key={item.payload} className="inline-flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-1 text-sm text-ink">
+                  {item.label}
+                  <button className="text-muted hover:text-danger" type="button" onClick={() => removeScanned(item.payload)}>Remove</button>
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
         <textarea
           className="desk-input mt-3 h-24 w-full font-mono text-sm"
@@ -70,8 +161,9 @@ export function DirectLoans({ makerspace }: { makerspace: Makerspace }) {
           Issue direct handout
         </button>
         {issue.error ? <p className="mt-3 text-sm text-danger">{issue.error.message}</p> : null}
+        {products.error ? <p className="mt-3 text-sm text-danger">{products.error.message}</p> : null}
+        {showScanner ? <QrScanner onScan={handleScan} onClose={() => setShowScanner(false)} /> : null}
       </Panel>
-
       <Panel title="Direct handout loans">
         <div className="grid gap-2">
           {loans.data?.results?.map((loan) => (
@@ -96,4 +188,10 @@ export function DirectLoans({ makerspace }: { makerspace: Makerspace }) {
       </Panel>
     </div>
   );
+}
+
+function labelForTarget(target: QrResolveResponse["target"], fallback: string) {
+  if (target.type === "product") return target.name || fallback;
+  if (target.type === "asset") return target.product || target.asset_tag || fallback;
+  return target.label || target.code || fallback;
 }
