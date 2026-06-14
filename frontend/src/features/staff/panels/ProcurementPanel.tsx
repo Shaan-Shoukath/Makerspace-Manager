@@ -21,6 +21,13 @@ type Form = { name: string; quantity: string; link: string; estimated_unit_cost:
 
 const emptyForm: Form = { name: "", quantity: "1", link: "", estimated_unit_cost: "", kind: "hardware" };
 
+// Only render a clickable link for http(s) URLs. The backend URLField already
+// rejects javascript:/data: at write time; this is defense-in-depth so a stored
+// non-http scheme can never become a clickable href.
+function safeHref(link: string): string | null {
+  return /^https?:\/\//i.test(link) ? link : null;
+}
+
 export function ProcurementPanel({ makerspace, canChooseKind = false }: { makerspace: Makerspace; canChooseKind?: boolean }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<Form>(emptyForm);
@@ -128,7 +135,13 @@ export function ProcurementPanel({ makerspace, canChooseKind = false }: { makers
                   <td className="px-3 py-2">{item.name}</td>
                   <td className="px-3 py-2">{item.quantity}</td>
                   <td className="px-3 py-2">
-                    {item.link ? <a className="text-accent underline" href={item.link} target="_blank" rel="noreferrer">link</a> : "-"}
+                    {safeHref(item.link) ? (
+                      <a className="text-accent underline" href={safeHref(item.link)!} target="_blank" rel="noreferrer">link</a>
+                    ) : item.link ? (
+                      <span className="text-muted" title={item.link}>{item.link}</span>
+                    ) : (
+                      "-"
+                    )}
                   </td>
                   <td className="px-3 py-2">{item.estimated_unit_cost ?? "-"}</td>
                   <td className="px-3 py-2 text-muted">{item.created_by_username ?? "-"}</td>
