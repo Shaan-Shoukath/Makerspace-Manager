@@ -88,6 +88,7 @@ class AdminRequestItemSerializer(serializers.Serializer):
     returned_quantity = serializers.IntegerField(read_only=True)
     damaged_quantity = serializers.IntegerField(read_only=True)
     missing_quantity = serializers.IntegerField(read_only=True)
+    needs_fix_quantity = serializers.IntegerField(read_only=True)
 
 
 class AdminRequestSerializer(serializers.Serializer):
@@ -122,6 +123,15 @@ class AssignBoxSerializer(serializers.Serializer):
     box_code = serializers.CharField()
 
 
+class IssueRejectSerializer(serializers.Serializer):
+    item_id = serializers.IntegerField()
+    broken = serializers.IntegerField(min_value=0, default=0)
+    # "needs_fix" -> to-be-fixed shelf (default); "remove" -> scrapped out of inventory.
+    disposition = serializers.ChoiceField(
+        choices=["needs_fix", "remove"], default="needs_fix"
+    )
+
+
 class IssueRequestSerializer(serializers.Serializer):
     evidence_id = serializers.IntegerField()
     remark = serializers.CharField(
@@ -134,6 +144,8 @@ class IssueRequestSerializer(serializers.Serializer):
         required=False,
         default=list,
     )
+    # Per-item units rejected as broken at handover (quantity-mode items only).
+    rejects = IssueRejectSerializer(many=True, required=False, default=list)
 
 
 class ReturnDueSerializer(serializers.Serializer):

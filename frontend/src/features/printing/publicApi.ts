@@ -103,3 +103,10 @@ export function fetchPrintStatus(publicToken: string) {
     `/printing/public/requests/${publicToken}/status`,
   );
 }
+
+export function fetchPrintStatusByEmail(slug: string, email: string) {
+  return publicV1Request<{ results: PrintStatus[] }>(
+    `/printing/public/${slug}/status-by-email`,
+    { method: "POST", body: JSON.stringify({ email }) },
+  );
+}

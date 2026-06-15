@@ -13,10 +13,17 @@ export type RejectRequestValues = {
   reason: string;
 };
 
+export type IssueReject = {
+  item_id: number;
+  broken: number;
+  disposition: "needs_fix" | "remove";
+};
+
 export type AssignIssueValues = {
   boxCode: string;
   evidenceId: number;
   remark: string;
+  rejects: IssueReject[];
 };
 
 export type ReturnRequestValues = {
@@ -103,6 +110,7 @@ export function AssignIssueModal({ row, open, pending, error, onClose, onSubmit,
   const [boxCode, setBoxCode] = useState(row?.assigned_box?.code ?? "");
   const [evidenceId, setEvidenceId] = useState<number | null>(null);
   const [remark, setRemark] = useState("Issued from staff app.");
+  const [rejects, setRejects] = useState<Record<number, { broken: number; disposition: "needs_fix" | "remove" }>>({});
   const [validationError, setValidationError] = useState("");
 
   useEffect(() => {
@@ -110,9 +118,21 @@ export function AssignIssueModal({ row, open, pending, error, onClose, onSubmit,
       setBoxCode(row?.assigned_box?.code ?? "");
       setEvidenceId(null);
       setRemark("Issued from staff app.");
+      setRejects({});
       setValidationError("");
     }
   }, [open, row]);
+
+  const setBroken = (itemId: number, broken: number) =>
+    setRejects((current) => ({
+      ...current,
+      [itemId]: { broken: Math.max(0, broken || 0), disposition: current[itemId]?.disposition ?? "needs_fix" },
+    }));
+  const setDisposition = (itemId: number, disposition: "needs_fix" | "remove") =>
+    setRejects((current) => ({
+      ...current,
+      [itemId]: { broken: current[itemId]?.broken ?? 0, disposition },
+    }));
 
   return (
     <Modal open={open} onClose={onClose} title={row ? `Assign and issue request #${row.id}` : "Assign and issue"} footer={<FormFooter formId="assign-issue-form" pending={pending} submitLabel="Assign + issue" onCancel={onClose} />}>
@@ -129,10 +149,23 @@ export function AssignIssueModal({ row, open, pending, error, onClose, onSubmit,
               setValidationError("Upload an issue photo before issuing.");
               return;
             }
-            onSubmit({ boxCode: boxCode.trim(), evidenceId, remark });
+            const overflow = (row?.items ?? []).find(
+              (item) => (rejects[item.id]?.broken ?? 0) > item.accepted_quantity,
+            );
+            if (overflow) {
+              setValidationError(`Can't reject more than ${overflow.accepted_quantity} of ${overflow.product_name}.`);
+              return;
+            }
+            const rejectList = Object.entries(rejects)
+              .filter(([, value]) => value.broken > 0)
+              .map(([itemId, value]) => ({ item_id: Number(itemId), broken: value.broken, disposition: value.disposition }));
+            onSubmit({ boxCode: boxCode.trim(), evidenceId, remark, rejects: rejectList });
           })
         }
       >
+        {row?.assigned_box ? (
+          <p className="text-xs text-muted">Box: <span className="font-medium text-ink">{row.assigned_box.label} ({row.assigned_box.code})</span></p>
+        ) : null}
         <label className="grid gap-1 text-sm">
           <span className="font-medium text-ink">Box QR code</span>
           <input className="desk-input" value={boxCode} disabled={pending} onChange={(event) => setBoxCode(event.target.value)} />
@@ -145,6 +178,36 @@ export function AssignIssueModal({ row, open, pending, error, onClose, onSubmit,
           <span className="font-medium text-ink">Remark</span>
           <textarea className="desk-input min-h-20 w-full resize-y" value={remark} disabled={pending} onChange={(event) => setRemark(event.target.value)} />
         </label>
+        <div className="grid gap-2">
+          <p className="text-sm font-medium text-ink">Items — reject any broken units</p>
+          {row?.items.map((item) => {
+            const reject = rejects[item.id];
+            const broken = reject?.broken ?? 0;
+            return (
+              <div key={item.id} className="rounded-md border border-line p-2">
+                <p className="text-sm font-medium text-ink">{item.product_name} <span className="text-muted">×{item.accepted_quantity}</span></p>
+                <div className="mt-2 grid gap-2 sm:grid-cols-[auto_1fr] sm:items-end">
+                  <label className="grid gap-1 text-xs text-muted">
+                    <span>Reject as broken</span>
+                    <input className="desk-input w-24" type="number" min="0" max={item.accepted_quantity} value={broken} disabled={pending} onChange={(event) => setBroken(item.id, Number(event.target.value))} />
+                  </label>
+                  {broken > 0 ? (
+                    <label className="grid gap-1 text-xs text-muted">
+                      <span>Send broken units to</span>
+                      <select className="desk-input" value={reject?.disposition ?? "needs_fix"} disabled={pending} onChange={(event) => setDisposition(item.id, event.target.value as "needs_fix" | "remove")}>
+                        <option value="needs_fix">To-be-fixed shelf</option>
+                        <option value="remove">Remove from inventory</option>
+                      </select>
+                    </label>
+                  ) : null}
+                </div>
+                {broken > 0 ? (
+                  <p className="mt-1 text-xs text-muted">Issuing {Math.max(0, item.accepted_quantity - broken)}, {broken} not handed over.</p>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
         <ErrorText message={validationError || error} />
       </form>
     </Modal>

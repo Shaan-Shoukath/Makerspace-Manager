@@ -6,6 +6,7 @@ from apps.printing.public_views import (
     PrintUploadPresignView,
     PublicPrintBucketsView,
     PublicPrintSpoolsView,
+    PublicPrintStatusByEmailView,
     PublicPrintStatusView,
 )
 from apps.printing.reports_views import (
@@ -63,6 +64,11 @@ urlpatterns = [
         "public/requests/<uuid:public_token>/status",
         PublicPrintStatusView.as_view(),
         name="public-request-status",
+    ),
+    path(
+        "public/<slug:makerspace_slug>/status-by-email",
+        PublicPrintStatusByEmailView.as_view(),
+        name="public-request-status-by-email",
     ),
     path(
         "admin/makerspace/<int:makerspace_id>/printing/reports",

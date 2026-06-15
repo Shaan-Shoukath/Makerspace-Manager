@@ -4,6 +4,9 @@
 
 @layer base {
   :root {
+    /* Make native controls (select popups, date/number spinners, autofill) follow
+       the theme — without this, dark mode renders white/light form fields. */
+    color-scheme: light;
     --color-accent: 37 99 235;
     --color-ink: 17 24 39;
     --color-bg: 248 250 252;
@@ -17,6 +20,7 @@
   }
 
   :root.dark {
+    color-scheme: dark;
     --color-accent: 251 185 5;
     --color-ink: 229 231 235;
     --color-bg: 9 9 11;

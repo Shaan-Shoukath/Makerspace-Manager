@@ -22,6 +22,7 @@ import {
   Categories,
   Inventory,
   Ledger,
+  NeedsFixShelf,
   OperationsReports,
   Panel,
   PrintingPanel,
@@ -36,7 +37,7 @@ import {
 } from "./StaffPanels";
 
 const ALL_TABS = [
-  "requests", "direct", "inventory", "categories", "printing", "tobuy", "transfers",
+  "requests", "direct", "inventory", "needsfix", "categories", "printing", "tobuy", "transfers",
   "stocktake", "ledger", "reports", "bulk", "qr", "api", "users", "audit",
 ] as const;
 // Membership roles that get the full staff console. Anything else (print_manager,
@@ -199,8 +200,11 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
   // managers. Guest admins (and unknown roles) have none, so hide the tab for them
   // rather than render an empty list whose actions 403.
   const canUseToBuy = isSuperadmin || ["space_manager", "inventory_manager", "print_manager"].includes(activeRole ?? "");
+  // EDIT_INVENTORY roles only (guest admins can't repair/scrap stock).
+  const canEditInventory = isSuperadmin || ["space_manager", "inventory_manager"].includes(activeRole ?? "");
   const allowedTabs: readonly string[] = (fullAccess ? ALL_TABS : PRINTING_TABS).filter((tabName) => {
     if (tabName === "tobuy") return canUseToBuy;
+    if (tabName === "needsfix") return canEditInventory;
     if (tabName === "printing") return canSeePrinting; // hide printer/spool mgmt from inventory managers
     if (tabName === "requests") return canSeeHardware || canSeePrinting;
     return true;
@@ -247,7 +251,7 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
                 }`}
                 onClick={() => setTab(item)}
               >
-                  {item === "qr" ? "QR Tools" : item === "direct" ? "Direct handout" : item === "api" ? "API access" : item === "stocktake" ? "Stocktake" : item === "printing" ? "3D Printing" : item === "tobuy" ? "To Buy" : item[0].toUpperCase() + item.slice(1)}
+                  {item === "qr" ? "QR Tools" : item === "direct" ? "Direct handout" : item === "api" ? "API access" : item === "stocktake" ? "Stocktake" : item === "printing" ? "3D Printing" : item === "tobuy" ? "To Buy" : item === "needsfix" ? "To-be-fixed" : item[0].toUpperCase() + item.slice(1)}
               </button>
             ))}
           </nav>
@@ -294,6 +298,9 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
           ) : null}
           {activeMakerspace && activeTab === "inventory" ? (
             <Inventory makerspace={activeMakerspace} />
+          ) : null}
+          {activeMakerspace && activeTab === "needsfix" ? (
+            <NeedsFixShelf makerspace={activeMakerspace} />
           ) : null}
           {activeMakerspace && activeTab === "categories" ? (
             <Categories makerspace={activeMakerspace} />

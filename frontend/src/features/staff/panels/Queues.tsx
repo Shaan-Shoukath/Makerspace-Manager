@@ -21,10 +21,12 @@ export type RequestItem = {
   product_id: number;
   product_name: string;
   requested_quantity: number;
+  accepted_quantity: number;
   issued_quantity: number;
   returned_quantity: number;
   damaged_quantity: number;
   missing_quantity: number;
+  needs_fix_quantity: number;
 };
 export type HardwareRequest = {
   id: number;
@@ -125,7 +127,7 @@ export function Queues({ makerspace, guestOnly }: { makerspace: Makerspace; gues
       });
       await action.mutateAsync({
         path: `/admin/requests/${assignIssueRow.id}/issue`,
-        body: { evidence_id: values.evidenceId, remark: values.remark },
+        body: { evidence_id: values.evidenceId, remark: values.remark, rejects: values.rejects },
       });
       closeModals();
     } catch (error) {

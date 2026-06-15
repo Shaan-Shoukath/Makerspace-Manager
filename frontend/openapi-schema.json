@@ -1292,6 +1292,109 @@
                 }
             }
         },
+        "/api/v1/admin/inventory/{id}/needs-fix": {
+            "post": {
+                "operationId": "api_v1_admin_inventory_needs_fix_create",
+                "description": "Repair (back to available) or scrap (out of inventory) units on the shelf.",
+                "summary": "Repair or scrap units on the to-be-fixed shelf",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Admin inventory"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/NeedsFixAction"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/NeedsFixAction"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/NeedsFixAction"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InventoryProductAdmin"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/inventory/needs-fix": {
+            "get": {
+                "operationId": "api_v1_admin_inventory_needs_fix_list",
+                "description": "The to-be-fixed shelf: products that currently have units awaiting repair.",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "page_size",
+                        "required": false,
+                        "in": "query",
+                        "description": "Number of results to return per page.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "tags": [
+                    "api"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedInventoryProductAdminList"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/v1/admin/ledger": {
             "get": {
                 "operationId": "api_v1_admin_ledger_retrieve",
@@ -7512,6 +7615,56 @@
                 }
             }
         },
+        "/api/v1/printing/public/{makerspace_slug}/status-by-email": {
+            "post": {
+                "operationId": "api_v1_printing_public_status_by_email_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "makerspace_slug",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Public printing"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PublicPrintStatusByEmailRequest"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PublicPrintStatusByEmailRequest"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PublicPrintStatusByEmailRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PublicPrintStatusByEmailResponse"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/v1/printing/public/{makerspace_slug}/uploads": {
             "post": {
                 "operationId": "api_v1_printing_public_uploads_create",
@@ -8900,6 +9053,14 @@
                 "type": "string",
                 "description": "* `active` - Active\n* `restricted` - Restricted\n* `suspended` - Suspended"
             },
+            "ActionEnum": {
+                "enum": [
+                    "repair",
+                    "scrap"
+                ],
+                "type": "string",
+                "description": "* `repair` - repair\n* `scrap` - scrap"
+            },
             "AdminRequest": {
                 "type": "object",
                 "properties": {
@@ -9042,6 +9203,10 @@
                     "missing_quantity": {
                         "type": "integer",
                         "readOnly": true
+                    },
+                    "needs_fix_quantity": {
+                        "type": "integer",
+                        "readOnly": true
                     }
                 },
                 "required": [
@@ -9050,6 +9215,7 @@
                     "id",
                     "issued_quantity",
                     "missing_quantity",
+                    "needs_fix_quantity",
                     "product_id",
                     "product_name",
                     "requested_quantity",
@@ -9925,6 +10091,14 @@
                     }
                 }
             },
+            "DispositionEnum": {
+                "enum": [
+                    "needs_fix",
+                    "remove"
+                ],
+                "type": "string",
+                "description": "* `needs_fix` - needs_fix\n* `remove` - remove"
+            },
             "Error": {
                 "type": "object",
                 "properties": {
@@ -10235,6 +10409,10 @@
                         "maximum": 2147483647,
                         "minimum": 0
                     },
+                    "needs_fix_quantity": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
                     "is_public": {
                         "type": "boolean"
                     },
@@ -10270,6 +10448,7 @@
                     "id",
                     "makerspace",
                     "name",
+                    "needs_fix_quantity",
                     "updated_at"
                 ]
             },
@@ -10296,6 +10475,30 @@
                     "reason"
                 ]
             },
+            "IssueReject": {
+                "type": "object",
+                "properties": {
+                    "item_id": {
+                        "type": "integer"
+                    },
+                    "broken": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0
+                    },
+                    "disposition": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/DispositionEnum"
+                            }
+                        ],
+                        "default": "needs_fix"
+                    }
+                },
+                "required": [
+                    "item_id"
+                ]
+            },
             "IssueRequest": {
                 "type": "object",
                 "properties": {
@@ -10310,6 +10513,12 @@
                         "type": "array",
                         "items": {
                             "type": "string"
+                        }
+                    },
+                    "rejects": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/IssueReject"
                         }
                     }
                 },
@@ -10529,6 +10738,22 @@
                     "smtp_password_set",
                     "telegram_bot_token_set",
                     "updated_at"
+                ]
+            },
+            "NeedsFixAction": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "$ref": "#/components/schemas/ActionEnum"
+                    },
+                    "quantity": {
+                        "type": "integer",
+                        "minimum": 1
+                    }
+                },
+                "required": [
+                    "action",
+                    "quantity"
                 ]
             },
             "PaginatedAdminRequestList": {
@@ -11402,6 +11627,10 @@
                         "type": "integer",
                         "maximum": 2147483647,
                         "minimum": 0
+                    },
+                    "needs_fix_quantity": {
+                        "type": "integer",
+                        "readOnly": true
                     },
                     "is_public": {
                         "type": "boolean"
@@ -12697,6 +12926,32 @@
                     "started_at",
                     "status",
                     "title"
+                ]
+            },
+            "PublicPrintStatusByEmailRequest": {
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "format": "email"
+                    }
+                },
+                "required": [
+                    "email"
+                ]
+            },
+            "PublicPrintStatusByEmailResponse": {
+                "type": "object",
+                "properties": {
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PublicPrintStatus"
+                        }
+                    }
+                },
+                "required": [
+                    "results"
                 ]
             },
             "PublicProduct": {

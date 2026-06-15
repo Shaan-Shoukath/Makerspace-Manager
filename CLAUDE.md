@@ -2,6 +2,34 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Recent batch — broken-at-handover, to-be-fixed shelf, email status (2026-06-16)
+
+- **Reject-broken at handover + needs-fix shelf.** New `InventoryProduct.needs_fix_quantity` and
+  `HardwareRequestItem.needs_fix_quantity` buckets (migrations `inventory/0008`, `hardware_requests/0012`);
+  `needs_fix` is now part of the `total >= Σ buckets` constraint, so **every place that recomputes total
+  (`availability.adjust_quantities`, `operations.services_stocktake`) includes it**. At issue,
+  `availability.issue_items(request, rejects_by_item)` takes per-item `(broken, disposition)`: broken units
+  leave `reserved` and go to `needs_fix` (disposition `needs_fix` → to-be-fixed shelf, stays in total) or are
+  scrapped (disposition `remove` → total drops); the rest issue normally. `handover_workflow.issue_request`
+  gained `rejects=[{item_id, broken, disposition}]` and **blocks broken-reject on INDIVIDUAL-tracked items**
+  (quantity-mode only this pass — asset MAINTENANCE flip is future). The **to-be-fixed shelf** is
+  `GET /admin/inventory/needs-fix` (list) + `POST /admin/inventory/<pk>/needs-fix` ({action: repair|scrap,
+  quantity}) in `admin_api/views_needs_fix.py`, backed by `availability.repair_from_needs_fix` /
+  `scrap_from_needs_fix` (EDIT_INVENTORY-gated, audited). Frontend: the **Assign + issue** modal has a per-item
+  "reject as broken" count + disposition (To-be-fixed shelf / Remove from inventory); a new **To-be-fixed**
+  staff tab (`NeedsFixShelf`, EDIT_INVENTORY roles only) lists shelf items with repair/scrap.
+  Tests: `tests/test_handover_broken_reject.py`.
+- **Public print status is email-based** (not token, not email-notification-dependent — many makerspaces lack
+  SMTP). `POST /printing/public/<slug>/status-by-email` ({email}) returns `{results:[...]}` of the requester's
+  recent requests (AllowAny, `request_status` throttle; enumeration-security intentionally waived per product
+  call). The public page's status card is now an email form; the `?token=` deep-link still works as a fallback.
+  The manual public-token box was removed.
+- **Dark-mode form fields fixed.** `index.css` sets `color-scheme: light` / `dark` on `:root` / `:root.dark`
+  so native controls (select popups, date/number spinners, autofill) follow the theme instead of rendering white.
+- **Public scan consolidation.** Removed the catalog header "Scan a tool" button; the request panel's
+  "QR checkout" tab is renamed **"Scan a tool"** and gained the camera `QrScanner` (was paste-only). The
+  dedicated `/m/<slug>/checkout` page still exists by URL.
+
 ## Recent batch — printing/login/upload polish + unified Requests (2026-06-15)
 
 QA-driven fixes across printing, login, uploads, and the staff console:

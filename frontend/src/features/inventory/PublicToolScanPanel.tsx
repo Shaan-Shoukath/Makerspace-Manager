@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
 import { Card } from "../../components/ui/Card";
+import QrScanner from "../../components/ui/QrScanner";
 import type { PublicToolLoan } from "../../types/inventory";
 import { publicToolCheckout, publicToolReturn } from "./api";
 
@@ -34,6 +35,7 @@ export function PublicToolScanPanel({
   makerspaceSlug,
 }: PublicToolScanPanelProps) {
   const [payload, setPayload] = useState("");
+  const [scannerOpen, setScannerOpen] = useState(false);
   const checkout = useMutation({
     mutationFn: () =>
       publicToolCheckout(makerspaceSlug, {
@@ -61,9 +63,17 @@ export function PublicToolScanPanel({
       <p className="mt-2 text-sm leading-6 text-muted">
         Use your Check-In email or phone above, then scan or paste the tool QR payload.
       </p>
+      <button
+        className="desk-button mt-4 w-full"
+        disabled={!identifier.trim()}
+        type="button"
+        onClick={() => setScannerOpen(true)}
+      >
+        Scan QR with camera
+      </button>
       <input
-        className="desk-input mt-4 w-full"
-        placeholder="Tool, asset, or box QR payload"
+        className="desk-input mt-2 w-full"
+        placeholder="…or paste a tool, asset, or box QR payload"
         value={payload}
         onChange={(event) => setPayload(event.target.value)}
       />
@@ -94,6 +104,15 @@ export function PublicToolScanPanel({
         <div className="mt-3">
           <LoanResult loan={result} />
         </div>
+      ) : null}
+      {scannerOpen ? (
+        <QrScanner
+          onClose={() => setScannerOpen(false)}
+          onScan={(scanned) => {
+            setPayload(scanned);
+            setScannerOpen(false);
+          }}
+        />
       ) : null}
     </Card>
   );

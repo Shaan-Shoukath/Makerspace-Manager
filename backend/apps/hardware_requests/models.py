@@ -111,6 +111,8 @@ class HardwareRequestItem(models.Model):
     returned_quantity = models.PositiveIntegerField(default=0)
     damaged_quantity = models.PositiveIntegerField(default=0)
     missing_quantity = models.PositiveIntegerField(default=0)
+    # Units rejected as broken at handover (never issued; sent to the needs_fix bucket).
+    needs_fix_quantity = models.PositiveIntegerField(default=0)
 
     class Meta:
         constraints = [

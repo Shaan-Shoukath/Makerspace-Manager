@@ -168,7 +168,7 @@ export function PublicRequestPanel({
               type="button"
               onClick={() => setActiveTab("scan")}
             >
-              QR checkout
+              Scan a tool
             </button>
             <button
               aria-controls="public-request-status-panel"

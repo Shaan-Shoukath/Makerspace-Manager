@@ -78,8 +78,18 @@ def assign_box(actor, request, box_code):
         return locked
 
 
-def issue_request(actor, request, evidence_id, remark="", asset_qr_payloads=None):
+def issue_request(actor, request, evidence_id, remark="", asset_qr_payloads=None, rejects=None):
     asset_qr_payloads = list(asset_qr_payloads or [])
+    # rejects: [{"item_id", "broken", "disposition"}] — units rejected as broken at
+    # handover, either sent to the needs-fix shelf or scrapped out of inventory.
+    rejects_by_item = {
+        int(entry["item_id"]): (
+            max(0, int(entry.get("broken", 0))),
+            entry.get("disposition", availability.REJECT_NEEDS_FIX),
+        )
+        for entry in (rejects or [])
+        if int(entry.get("broken", 0)) > 0
+    }
     evidence = EvidencePhoto.objects.filter(
         pk=evidence_id,
         makerspace_id=request.makerspace_id,
@@ -103,12 +113,15 @@ def issue_request(actor, request, evidence_id, remark="", asset_qr_payloads=None
         ).exists():
             raise RequestValidationError("Box scan required before issue.")
 
+        if rejects_by_item:
+            _validate_broken_rejects(locked, rejects_by_item)
+
         # Lock QR -> asset -> product, matching the self-checkout/direct-loan order
         # (those lock the QrCode first, then the product). Acquiring the asset/QR
         # locks before availability.issue_items() takes the InventoryProduct lock
         # avoids a lock-order inversion / deadlock across the handout flows.
         _issue_individual_assets(actor, locked, asset_qr_payloads)
-        availability.issue_items(locked)
+        availability.issue_items(locked, rejects_by_item)
         locked.issue_evidence = evidence
         locked.issue_remark = remark
         locked.issued_by = actor
@@ -149,6 +162,26 @@ def issue_request(actor, request, evidence_id, remark="", asset_qr_payloads=None
         )
         transaction.on_commit(lambda request_id=locked.pk: _notify_issued(request_id))
         return locked
+
+
+def _validate_broken_rejects(locked, rejects_by_item):
+    """Per-item broken-reject is quantity-mode only this pass: individual-tracked items
+    flip specific asset rows at return, so rejecting an abstract count here would drift
+    the asset statuses from the product buckets."""
+    items = {item.id: item for item in locked.items.select_related("product")}
+    for item_id, (broken, _disposition) in rejects_by_item.items():
+        item = items.get(item_id)
+        if item is None:
+            raise RequestValidationError("Unknown item in broken rejects.")
+        if broken > item.accepted_quantity:
+            raise RequestValidationError(
+                "Cannot reject more units as broken than were accepted."
+            )
+        if item.product.tracking_mode == TrackingMode.INDIVIDUAL:
+            raise RequestValidationError(
+                "Individual-tracked items can't be rejected as broken at handover; "
+                "issue them and mark the specific unit damaged at return."
+            )
 
 
 def _issue_individual_assets(actor, locked, asset_qr_payloads):

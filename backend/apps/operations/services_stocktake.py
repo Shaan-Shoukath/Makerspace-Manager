@@ -122,6 +122,7 @@ def _apply_product_line(line):
         + product.issued_quantity
         + product.damaged_quantity
         + product.lost_quantity
+        + product.needs_fix_quantity
     )
     product.save()
 

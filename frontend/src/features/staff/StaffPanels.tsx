@@ -3,6 +3,7 @@ export { BulkImport } from "./panels/BulkImport";
 export { Categories } from "./panels/Categories";
 export { Inventory } from "./panels/Inventory";
 export { Ledger } from "./panels/Ledger";
+export { NeedsFixShelf } from "./panels/NeedsFixShelf";
 export { OperationsReports } from "./panels/OperationsReports";
 export { PrintingPanel } from "./panels/PrintingPanel";
 export { ProcurementPanel } from "./panels/ProcurementPanel";

@@ -16,6 +16,7 @@ import {
 import {
   fetchPublicSpools,
   fetchPrintStatus,
+  fetchPrintStatusByEmail,
   presignPrintUpload,
   submitPrintRequest,
   uploadToStorage,
@@ -33,6 +34,7 @@ export function PublicPrintRequestPage() {
   const [screenshotFiles, setScreenshotFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState("");
   const [submittedToken, setSubmittedToken] = useState("");
+  const [statusEmail, setStatusEmail] = useState("");
   const statusLinkHandledRef = useRef(false);
   // Anti-spam honeypot: hidden from real users; a bot that autofills it triggers the
   // backend decoy-success (no request created).
@@ -46,6 +48,10 @@ export function PublicPrintRequestPage() {
   });
   const statusMutation = useMutation({
     mutationFn: (token: string) => fetchPrintStatus(token.trim()),
+  });
+  const statusByEmailMutation = useMutation({
+    mutationFn: (email: string) =>
+      fetchPrintStatusByEmail(makerspaceSlug, email.trim()),
   });
   useEffect(() => {
     if (statusLinkHandledRef.current) {
@@ -139,6 +145,13 @@ export function PublicPrintRequestPage() {
     }
   }
 
+  function checkStatusByEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (statusEmail.trim()) {
+      statusByEmailMutation.mutate(statusEmail.trim());
+    }
+  }
+
   return (
     <main className="desk-shell">
       <header className="border-b border-line bg-panel">
@@ -152,7 +165,7 @@ export function PublicPrintRequestPage() {
                 {displayName}
               </h1>
               <p className="mt-2 text-sm text-muted">
-                Submit print files — we'll email you status updates at every step.
+                Submit print files — check status anytime with your email.
               </p>
             </div>
             <Link className="desk-button" to={`/m/${makerspaceSlug}`}>
@@ -223,17 +236,52 @@ export function PublicPrintRequestPage() {
             <p className="text-xs font-semibold uppercase tracking-wide text-accent">
               Status Tracker
             </p>
-            <p className="mt-3 text-sm text-muted">
-              We email status updates to your contact email at every step
-              (received → accepted → printing → ready to collect). Open the link in
-              those emails to see the live status here — no token to copy.
-            </p>
+            <form className="mt-3 space-y-3" onSubmit={checkStatusByEmail}>
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">
+                  Request email
+                </span>
+                <input
+                  className="desk-input w-full"
+                  type="email"
+                  value={statusEmail}
+                  onChange={(event) => setStatusEmail(event.target.value)}
+                />
+              </label>
+              <button
+                className="desk-button"
+                disabled={!statusEmail.trim() || statusByEmailMutation.isPending}
+                type="submit"
+              >
+                {statusByEmailMutation.isPending ? "Checking..." : "Check status"}
+              </button>
+            </form>
             <div className="mt-4">
               <StatusResult
                 error={statusMutation.error}
                 isPending={statusMutation.isPending}
                 status={statusMutation.data}
               />
+            </div>
+            <div className="mt-4 space-y-4">
+              {statusByEmailMutation.error ? (
+                <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+                  {statusByEmailMutation.error.message}
+                </p>
+              ) : null}
+              {statusByEmailMutation.data?.results.map((status) => (
+                <StatusResult
+                  error={null}
+                  isPending={false}
+                  key={status.public_token}
+                  status={status}
+                />
+              ))}
+              {statusByEmailMutation.data?.results.length === 0 ? (
+                <p className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-muted">
+                  No requests found for that email.
+                </p>
+              ) : null}
             </div>
           </Card>
         </aside>

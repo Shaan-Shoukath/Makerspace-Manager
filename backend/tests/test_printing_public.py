@@ -6,7 +6,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from apps.printing.models import FilamentSpool, PrintBucket, PrintRequest, PrintRequestFile
-from tests.test_printing import make_bucket, make_space
+from tests.test_printing import make_bucket, make_space, make_user
 
 pytestmark = pytest.mark.django_db
 
@@ -38,6 +38,13 @@ def status_url(public_token):
     return reverse(
         "printing:public-request-status",
         kwargs={"public_token": str(public_token)},
+    )
+
+
+def status_by_email_url(makerspace):
+    return reverse(
+        "printing:public-request-status-by-email",
+        kwargs={"makerspace_slug": makerspace.slug},
     )
 
 
@@ -355,6 +362,73 @@ def test_status_lookup_by_token_hides_pii():
         "started_at",
         "completed_at",
     }
+
+
+def test_status_lookup_by_email_lists_recent_same_space_requests():
+    makerspace = make_space("public-print-status-email")
+    other_space = make_space("public-print-status-email-other")
+    enable_printing(makerspace)
+    enable_printing(other_space)
+    bucket = make_bucket(makerspace)
+    other_bucket = make_bucket(other_space)
+    requester = make_user("public-status-email-requester")
+    old_request = PrintRequest.objects.create(
+        bucket=bucket,
+        requester=requester,
+        title="Old bracket",
+        contact_email="Buyer@Example.com",
+    )
+    new_request = PrintRequest.objects.create(
+        bucket=bucket,
+        requester=requester,
+        title="New bracket",
+        contact_email="buyer@example.com",
+    )
+    PrintRequest.objects.create(
+        bucket=other_bucket,
+        requester=requester,
+        title="Other space",
+        contact_email="buyer@example.com",
+    )
+
+    response = public_client().post(
+        status_by_email_url(makerspace),
+        {"email": "BUYER@example.com"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert [item["public_token"] for item in response.data["results"]] == [
+        str(new_request.public_token),
+        str(old_request.public_token),
+    ]
+
+
+def test_status_lookup_by_email_returns_empty_results():
+    makerspace = make_space("public-print-status-email-empty")
+    enable_printing(makerspace)
+
+    response = public_client().post(
+        status_by_email_url(makerspace),
+        {"email": "missing@example.com"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data == {"results": []}
+
+
+def test_status_lookup_by_email_rejects_invalid_email():
+    makerspace = make_space("public-print-status-email-invalid")
+    enable_printing(makerspace)
+
+    response = public_client().post(
+        status_by_email_url(makerspace),
+        {"email": "not-an-email"},
+        format="json",
+    )
+
+    assert response.status_code == 400
 
 
 def test_status_unknown_token_404():

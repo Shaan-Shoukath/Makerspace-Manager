@@ -32,6 +32,7 @@ class InventoryProductAdminSerializer(serializers.ModelSerializer):
             "issued_quantity",
             "damaged_quantity",
             "lost_quantity",
+            "needs_fix_quantity",
             "is_public",
             "public_self_checkout_enabled",
             "show_public_count",
@@ -45,7 +46,8 @@ class InventoryProductAdminSerializer(serializers.ModelSerializer):
         # never be reassigned on PATCH, or a manager in one tenant could move a
         # product into another. Box scope is enforced in the view (it knows the
         # authoritative makerspace).
-        read_only_fields = ["id", "makerspace", "created_at", "updated_at"]
+        # needs_fix_quantity is owned by the handover/shelf workflow (never set directly).
+        read_only_fields = ["id", "makerspace", "needs_fix_quantity", "created_at", "updated_at"]
 
     def validate_tracking_mode(self, value):
         if value not in TrackingMode.values:

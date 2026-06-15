@@ -28,6 +28,16 @@ urlpatterns = [
     ),
     path("inventory/<int:pk>", views.InventoryDetailView.as_view(), name="admin-inventory-detail"),
     path(
+        "inventory/needs-fix",
+        views.NeedsFixShelfListView.as_view(),
+        name="admin-needs-fix-shelf",
+    ),
+    path(
+        "inventory/<int:pk>/needs-fix",
+        views.NeedsFixActionView.as_view(),
+        name="admin-needs-fix-action",
+    ),
+    path(
         "inventory/<int:pk>/adjust-quantity",
         views.InventoryQuantityAdjustmentView.as_view(),
         name="admin-inventory-adjust-quantity",

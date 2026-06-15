@@ -77,6 +77,9 @@ class InventoryProduct(models.Model):
     issued_quantity = models.PositiveIntegerField(default=0)
     damaged_quantity = models.PositiveIntegerField(default=0)
     lost_quantity = models.PositiveIntegerField(default=0)
+    # Units pulled out of circulation for repair (e.g. rejected as broken at handover).
+    # Counted within total but never available, so the usable count drops until repaired.
+    needs_fix_quantity = models.PositiveIntegerField(default=0)
     is_public = models.BooleanField(default=True)
     public_self_checkout_enabled = models.BooleanField(default=False)
     show_public_count = models.BooleanField(default=False)
@@ -122,6 +125,10 @@ class InventoryProduct(models.Model):
                 name="qty_lost_nonneg",
             ),
             models.CheckConstraint(
+                condition=models.Q(needs_fix_quantity__gte=0),
+                name="qty_needs_fix_nonneg",
+            ),
+            models.CheckConstraint(
                 condition=models.Q(
                     total_quantity__gte=(
                         models.F("available_quantity")
@@ -129,6 +136,7 @@ class InventoryProduct(models.Model):
                         + models.F("issued_quantity")
                         + models.F("damaged_quantity")
                         + models.F("lost_quantity")
+                        + models.F("needs_fix_quantity")
                     )
                 ),
                 name="qty_sum_within_total",

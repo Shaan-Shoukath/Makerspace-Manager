@@ -75,6 +75,7 @@ class IssueRequestView(APIView):
             serializer.validated_data["evidence_id"],
             serializer.validated_data["remark"],
             asset_qr_payloads=serializer.validated_data["asset_qr_payloads"],
+            rejects=serializer.validated_data["rejects"],
         )
         return Response(AdminRequestSerializer(updated).data)
 

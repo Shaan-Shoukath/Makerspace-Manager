@@ -1,8 +1,8 @@
 import uuid
 from types import SimpleNamespace
 
-from drf_spectacular.utils import extend_schema
-from rest_framework import generics, status
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import generics, serializers, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -45,6 +45,10 @@ def _honeypot_filled(payload):
     except AttributeError:
         return False
     return bool(str(value).strip())
+
+
+class PublicPrintStatusByEmailRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
 
 
 class PublicPrintBucketsView(APIView):
@@ -205,3 +209,39 @@ class PublicPrintStatusView(generics.RetrieveAPIView):
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
+
+
+class PublicPrintStatusByEmailView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [ClientTierRateThrottle]
+    throttle_scope = "request_status"
+
+    @extend_schema(
+        tags=["Public printing"],
+        auth=[],
+        request=PublicPrintStatusByEmailRequestSerializer,
+        responses={
+            200: inline_serializer(
+                name="PublicPrintStatusByEmailResponse",
+                fields={"results": PublicPrintStatusSerializer(many=True)},
+            )
+        },
+    )
+    def post(self, request, makerspace_slug):
+        # ACCEPTED RISK (deliberate product decision): this AllowAny lookup matches on
+        # contact_email WITHOUT verifying email ownership, so it is enumerable. Many
+        # makerspaces have no SMTP, so email *notifications* can't be relied on and a
+        # token is too opaque for requesters — knowing one's own print status is judged
+        # low-sensitivity enough to waive enumeration protection here. Throttled by the
+        # request_status scope. Do NOT copy this pattern to sensitive data.
+        makerspace = get_public_makerspace(makerspace_slug)
+        _require_module(makerspace)
+        serializer = PublicPrintStatusByEmailRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        requests = PrintRequest.objects.filter(
+            bucket__makerspace=makerspace,
+            contact_email__iexact=serializer.validated_data["email"],
+        ).order_by("-created_at")[:20]
+        return Response(
+            {"results": PublicPrintStatusSerializer(requests, many=True).data}
+        )
