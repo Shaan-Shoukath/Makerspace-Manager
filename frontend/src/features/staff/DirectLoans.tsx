@@ -14,7 +14,15 @@ type DirectLoan = {
   items: { product_name: string; quantity: number }[];
 };
 
-type ProductOption = { id: number; name: string; available_quantity: number };
+type ProductOption = {
+  id: number;
+  name: string;
+  available_quantity: number;
+  tracking_mode: string;
+  is_public: boolean;
+  public_self_checkout_enabled: boolean;
+  is_archived: boolean;
+};
 type LineDraft = { key: number; productId: string; quantity: string };
 type ScannedPayload = { payload: string; label: string };
 type QrResolveResponse = {
@@ -36,6 +44,16 @@ export function DirectLoans({ makerspace }: { makerspace: Makerspace }) {
   const products = useStaffGet<{ results: ProductOption[] }>(
     ["inventory-all", makerspace.id],
     `/admin/makerspace/${makerspace.id}/inventory?page_size=1000`,
+  );
+  // Manual (non-QR) direct handout only accepts public, non-archived, self-checkout
+  // quantity products (the backend _manual_product rule). Asset/individual items must be
+  // QR-scanned instead, so don't offer rejectable options in the manual dropdown.
+  const eligibleProducts = (products.data?.results ?? []).filter(
+    (product) =>
+      product.is_public &&
+      !product.is_archived &&
+      product.public_self_checkout_enabled &&
+      product.tracking_mode !== "individual",
   );
   const loans = useStaffGet<{ results: DirectLoan[] }>(
     ["direct-loans", makerspace.id],
@@ -123,7 +141,7 @@ export function DirectLoans({ makerspace }: { makerspace: Makerspace }) {
               <div key={line.key} className="grid gap-2 md:grid-cols-[1fr_120px_auto]">
                 <select className="desk-input" value={line.productId} disabled={products.isLoading} onChange={(e) => updateLine(line.key, { productId: e.target.value })}>
                   <option value="">Product</option>
-                  {products.data?.results?.map((product) => (
+                  {eligibleProducts.map((product) => (
                     <option key={product.id} value={product.id}>
                       {product.name} ({product.available_quantity} available)
                     </option>

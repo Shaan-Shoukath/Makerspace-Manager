@@ -12,6 +12,7 @@ export default function QrScanner({ onScan, onClose }: QrScannerProps) {
   const streamRef = useRef<MediaStream | null>(null);
   const intervalRef = useRef<number | null>(null);
   const detectorRef = useRef<any>(null);
+  const nativeFailedRef = useRef(false);
   const onScanRef = useRef(onScan);
   const lastScanRef = useRef({ value: "", at: 0 });
   const isDetectingRef = useRef(false);
@@ -47,11 +48,18 @@ export default function QrScanner({ onScan, onClose }: QrScannerProps) {
       if (!video || isDetectingRef.current || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
       isDetectingRef.current = true;
       try {
-        if ("BarcodeDetector" in window) {
-          const Detector = (window as any).BarcodeDetector;
-          detectorRef.current ??= new Detector({ formats: ["qr_code"] });
-          const results = await detectorRef.current.detect(video);
-          emitScan(results[0]?.rawValue ?? "");
+        if ("BarcodeDetector" in window && !nativeFailedRef.current) {
+          try {
+            const Detector = (window as any).BarcodeDetector;
+            detectorRef.current ??= new Detector({ formats: ["qr_code"] });
+            const results = await detectorRef.current.detect(video);
+            emitScan(results[0]?.rawValue ?? "");
+          } catch {
+            // Native BarcodeDetector exists but can't construct/read qr_code on this
+            // browser — stop retrying it and fall through to the zxing-wasm reader.
+            nativeFailedRef.current = true;
+            detectorRef.current = null;
+          }
         } else {
           zxingReaderPromise ??= import("zxing-wasm/reader");
           const { readBarcodesFromImageData } = await zxingReaderPromise;
@@ -69,10 +77,8 @@ export default function QrScanner({ onScan, onClose }: QrScannerProps) {
           emitScan(results[0]?.text ?? "");
         }
       } catch (err) {
-        if (!("BarcodeDetector" in window)) {
-          setError(err instanceof Error ? err.message : "QR scanner could not start.");
-          stopScanner();
-        }
+        setError(err instanceof Error ? err.message : "QR scanner could not start.");
+        stopScanner();
       } finally {
         isDetectingRef.current = false;
       }

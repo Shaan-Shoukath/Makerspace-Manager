@@ -34,6 +34,9 @@ export function PublicPrintRequestPage() {
   const [uploadProgress, setUploadProgress] = useState("");
   const [submittedToken, setSubmittedToken] = useState("");
   const [statusToken, setStatusToken] = useState("");
+  // Anti-spam honeypot: hidden from real users; a bot that autofills it triggers the
+  // backend decoy-success (no request created).
+  const [website, setWebsite] = useState("");
 
   const bootstrapQuery = useTenantBootstrap(makerspaceSlug);
   const bucketsQuery = useQuery({
@@ -87,6 +90,7 @@ export function PublicPrintRequestPage() {
 
       setUploadProgress(files.length ? "Submitting request..." : "");
       return submitPrintRequest(makerspaceSlug, {
+        website,
         identifier: identifier.trim(),
         bucket_id: Number(form.bucketId),
         title: form.title.trim(),
@@ -201,6 +205,8 @@ export function PublicPrintRequestPage() {
             submitPending={submitMutation.isPending}
             submitError={submitMutation.error}
             uploadProgress={uploadProgress}
+            website={website}
+            onWebsiteChange={setWebsite}
             onSubmit={submitForm}
           />
         </div>

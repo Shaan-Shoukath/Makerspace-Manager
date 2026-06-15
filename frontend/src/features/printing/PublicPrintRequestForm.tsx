@@ -49,6 +49,8 @@ type PrintDetailsFormProps = {
   submitPending: boolean;
   submitError?: Error | null;
   uploadProgress: string;
+  website: string;
+  onWebsiteChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -65,6 +67,8 @@ export function PrintDetailsForm({
   submitPending,
   submitError,
   uploadProgress,
+  website,
+  onWebsiteChange,
   onSubmit,
 }: PrintDetailsFormProps) {
   return (
@@ -73,6 +77,16 @@ export function PrintDetailsForm({
         Print Details
       </p>
       <form className="mt-4 space-y-4" onSubmit={onSubmit}>
+        {/* Honeypot: hidden from humans; bots that autofill it trigger the server decoy. */}
+        <input
+          aria-hidden="true"
+          autoComplete="off"
+          className="hidden"
+          name="website"
+          tabIndex={-1}
+          value={website}
+          onChange={(event) => onWebsiteChange(event.target.value)}
+        />
         <fieldset className="space-y-4" disabled={!verified || submitPending}>
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block">
