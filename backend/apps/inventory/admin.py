@@ -3,6 +3,7 @@ from django.contrib import messages
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
 from django.template.response import TemplateResponse
+from django.utils.safestring import mark_safe
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from unfold.admin import ModelAdmin
 from unfold.contrib.filters.admin import (
@@ -13,6 +14,8 @@ from unfold.contrib.filters.admin import (
     RelatedDropdownFilter,
 )
 
+from apps.boxes.models import QrCode
+from apps.boxes.qr_render import render_qr_label_svg
 from apps.inventory.models import Category, InventoryAsset, InventoryProduct
 from apps.operations import services as operations_services
 from apps.operations.serializers import AssetGenerateSerializer
@@ -131,3 +134,19 @@ class InventoryAssetAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
     search_fields = ("asset_tag", "serial_number", "product__name")
     autocomplete_fields = ("makerspace", "product", "box")
     list_select_related = ("makerspace", "product", "box")
+    readonly_fields = ("qr_preview",)
+
+    def qr_preview(self, obj):
+        if not obj or not obj.pk:
+            return "(save first)"
+        qr = QrCode.objects.filter(
+            target_type=QrCode.TargetType.ASSET,
+            target_id=obj.pk,
+            makerspace=obj.makerspace,
+            status=QrCode.Status.ACTIVE,
+        ).first()
+        if not qr:
+            return "(no active QR)"
+        return mark_safe(render_qr_label_svg(qr.payload, obj.asset_tag))
+
+    qr_preview.short_description = "QR preview"

@@ -1,3 +1,6 @@
+from urllib.parse import urlsplit
+
+from django.conf import settings
 from django.contrib.auth import logout
 from django.http import HttpResponseForbidden
 from django.urls import reverse
@@ -59,6 +62,21 @@ class AdminCspEvalMiddleware:
             if "'unsafe-eval'" not in script_src:
                 script_src.append("'unsafe-eval'")
             merged["script-src"] = script_src
+
+            endpoint = getattr(settings, "AWS_S3_PUBLIC_ENDPOINT_URL", "") or ""
+            if endpoint:
+                parts = urlsplit(endpoint)
+                if parts.scheme and parts.netloc:
+                    origin = f"{parts.scheme}://{parts.netloc}"
+                    img_src = merged.get("img-src", [])
+                    if isinstance(img_src, str):
+                        img_src = [img_src]
+                    else:
+                        img_src = list(img_src)
+                    if origin not in img_src:
+                        img_src.append(origin)
+                    merged["img-src"] = img_src
+
             response._csp_update = merged
         return response
 

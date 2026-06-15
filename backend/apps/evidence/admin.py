@@ -1,7 +1,9 @@
 from django.contrib import admin
+from django.utils.html import format_html
 from unfold.admin import ModelAdmin
 
 from apps.evidence.models import EvidencePhoto
+from apps.evidence.storage import presigned_get_url
 from config.admin_access import SuperuserOnlyModelAdmin
 
 
@@ -11,6 +13,7 @@ class EvidencePhotoAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
         "id",
         "makerspace",
         "evidence_type",
+        "thumb",
         "object_key",
         "uploaded_by",
         "created_at",
@@ -27,9 +30,43 @@ class EvidencePhotoAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
         "makerspace",
         "evidence_type",
         "object_key",
+        "photo_preview",
         "uploaded_by",
         "created_at",
     )
+
+    def photo_preview(self, obj):
+        if not obj or not getattr(obj, "object_key", ""):
+            return "(no image)"
+        try:
+            url = presigned_get_url(obj.object_key)
+        except Exception:
+            return "(image unavailable)"
+        if not url:
+            return "(image unavailable)"
+        return format_html(
+            '<a href="{}" target="_blank" rel="noopener"><img src="{}" '
+            'style="max-height:320px;border:1px solid #ccc"/></a><br>'
+            '<a href="{}" target="_blank" rel="noopener">Open full image</a>',
+            url,
+            url,
+            url,
+        )
+
+    photo_preview.short_description = "Photo"
+
+    def thumb(self, obj):
+        if not obj or not getattr(obj, "object_key", ""):
+            return "—"
+        try:
+            url = presigned_get_url(obj.object_key)
+        except Exception:
+            return "—"
+        if not url:
+            return "—"
+        return format_html('<img src="{}" style="max-height:48px"/>', url)
+
+    thumb.short_description = "Preview"
 
     def has_add_permission(self, request):
         return False

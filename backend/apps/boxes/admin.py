@@ -4,6 +4,7 @@ from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin
 
 from apps.boxes.models import Box, BoxScan, QrCode, QrScanEvent
+from apps.boxes.qr_render import render_qr_label_svg
 from config.admin_access import SuperuserOnlyModelAdmin
 
 
@@ -28,7 +29,14 @@ class QrCodeAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
     list_display = ("payload", "makerspace", "target_type", "target_id", "status", "updated_at")
     list_filter = ("makerspace", "target_type", "status")
     search_fields = ("payload",)
-    readonly_fields = ("payload", "created_at", "updated_at", "revoked_at")
+    readonly_fields = ("payload", "qr_preview", "created_at", "updated_at", "revoked_at")
+
+    def qr_preview(self, obj):
+        if not obj or not obj.pk:
+            return "(no QR)"
+        return mark_safe(render_qr_label_svg(obj.payload))
+
+    qr_preview.short_description = "QR preview"
 
 
 @admin.register(QrScanEvent)

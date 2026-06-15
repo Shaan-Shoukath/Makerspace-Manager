@@ -1,12 +1,14 @@
 from django.contrib import admin, messages
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.template.response import TemplateResponse
+from django.utils.html import format_html, format_html_join
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from unfold.admin import ModelAdmin
 
 from apps.printing import workflow
 from apps.printing.models import PrintRequest
 from apps.printing.serializers import PrintStartSerializer
+from apps.printing.storage import print_get_url
 from config.admin_access import SuperuserOnlyModelAdmin
 
 
@@ -27,15 +29,53 @@ class PrintRequestAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
     readonly_fields = (
         "status", "reason", "handled_by", "printer", "filament_spool",
         "estimated_minutes", "estimated_filament_grams", "created_at", "accepted_at",
-        "started_at", "completed_at", "updated_at",
+        "started_at", "completed_at", "updated_at", "files_preview",
     )
     fields = (
         "bucket", "requester", "title", "description", "material", "color", "quantity",
         "source_link", "model_file", "preferred_settings", "estimate_screenshot",
         "preview_screenshot", "status", "reason", "handled_by", "printer",
         "filament_spool", "estimated_minutes", "estimated_filament_grams", "created_at",
-        "accepted_at", "started_at", "completed_at", "updated_at",
+        "accepted_at", "started_at", "completed_at", "updated_at", "files_preview",
     )
+
+    def files_preview(self, obj):
+        if not obj or not obj.pk:
+            return "(save first)"
+
+        rows = []
+        for f in obj.files.all():
+            try:
+                url = print_get_url(f.object_key)
+            except Exception:
+                url = ""
+            label = f"{f.kind} #{f.id} ({f.size_bytes} bytes)"
+            if not url:
+                rows.append(format_html("<div>{} — unavailable</div>", label))
+                continue
+            if (f.content_type or "").startswith("image/"):
+                rows.append(
+                    format_html(
+                        '<div><a href="{}" target="_blank" rel="noopener">'
+                        '<img src="{}" style="max-height:160px;border:1px solid #ccc"/></a> {}</div>',
+                        url,
+                        url,
+                        label,
+                    )
+                )
+            else:
+                rows.append(
+                    format_html(
+                        '<div><a href="{}" target="_blank" rel="noopener">Download {}</a></div>',
+                        url,
+                        label,
+                    )
+                )
+        if not rows:
+            return "(no files)"
+        return format_html_join("", "{}", ((r,) for r in rows))
+
+    files_preview.short_description = "Uploaded files"
 
     @admin.action(description="Accept selected print requests")
     def accept_selected(self, request, queryset):

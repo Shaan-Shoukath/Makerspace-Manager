@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib import messages
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.http import HttpResponse
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from unfold.admin import ModelAdmin, TabularInline
 
@@ -14,6 +15,7 @@ from apps.operations.models import (
     StocktakeLine,
     StocktakeSession,
 )
+from apps.operations.qr_zip import build_batch_zip
 from config.admin_access import SuperuserOnlyModelAdmin
 
 
@@ -116,7 +118,7 @@ class QrPrintBatchItemInline(TabularInline):
 
 @admin.register(QrPrintBatch)
 class QrPrintBatchAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
-    actions = ["mark_printed_selected"]
+    actions = ["mark_printed_selected", "download_zip_selected"]
     list_display = ("id", "makerspace", "title", "status", "created_at", "printed_at")
     list_filter = ("status", "makerspace")
     inlines = (QrPrintBatchItemInline,)
@@ -134,3 +136,14 @@ class QrPrintBatchAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
 
         if success_count:
             self.message_user(request, f"Marked {success_count} QR print batch(es) as printed.", level=messages.SUCCESS)
+
+    @admin.action(description="Download QR ZIP (select exactly one batch)")
+    def download_zip_selected(self, request, queryset):
+        if queryset.count() != 1:
+            self.message_user(request, "Select exactly one batch to download.", level=messages.ERROR)
+            return None
+
+        batch = queryset.first()
+        resp = HttpResponse(build_batch_zip(batch), content_type="application/zip")
+        resp["Content-Disposition"] = f'attachment; filename="qr-batch-{batch.pk}.zip"'
+        return resp

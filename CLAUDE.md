@@ -89,7 +89,19 @@ design (U-SEC) — per-makerspace staff still operate solely in the React consol
 (`config/unfold.py`) is curated into grouped sections (Inventory · Requests & loans · Operations · 3D
 printing · Accounts & access · Integrations · Audit & evidence) covering every registered model; a
 test (`tests/test_admin_registration.py`) asserts every sidebar `reverse_lazy` link resolves so a
-model rename can't silently break the nav.
+model rename can't silently break the nav. **Superadmin monitoring surfaces** (read-only, no new
+RBAC/migrations) let the control plane mirror what the React console shows: `QrPrintBatchAdmin` has a
+**Download QR ZIP** action (reuses `operations.qr_zip.build_batch_zip`, one batch at a time);
+`QrCodeAdmin` and `InventoryAssetAdmin` render an inline **QR preview** (`boxes.qr_render.render_qr_label_svg`;
+the asset preview only shows an *active, same-makerspace* `QrCode`); `EvidencePhotoAdmin` renders
+issue/return **photos** inline + a changelist thumbnail via short-lived signed URLs
+(`evidence.storage.presigned_get_url`); and `PrintRequestAdmin` lists attached `PrintRequestFile`
+**downloads** via `printing.storage.print_get_url` (images inline, STL/PDF as links). All HTML is built
+with `format_html`/`format_html_join` and guards storage failures so a changelist never 500s. Because
+those thumbnails load from object storage, `config.admin_access.AdminCspEvalMiddleware` also appends the
+`AWS_S3_PUBLIC_ENDPOINT_URL` origin to `img-src` **only for `/control/` responses** (the global
+`CONTENT_SECURITY_POLICY` is untouched; QR data-URI SVGs are already covered by `img-src 'data:'`).
+Covered by `tests/test_admin_monitoring.py`.
 
 **Implementation is in progress.** Public inventory browse, staff auth/RBAC foundations,
 API-client HMAC support, QR/box foundations, Phase 3 audit/evidence
