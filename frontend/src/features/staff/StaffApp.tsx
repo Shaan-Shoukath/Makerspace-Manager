@@ -205,6 +205,9 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
   const canUseToBuy = isSuperadmin || ["space_manager", "inventory_manager", "print_manager"].includes(activeRole ?? "");
   // EDIT_INVENTORY roles only (guest admins can't repair/scrap stock).
   const canEditInventory = isSuperadmin || ["space_manager", "inventory_manager"].includes(activeRole ?? "");
+  // MANAGE_MAKERSPACE holders (Space Manager + superadmin) manage the tenant-frontend registry.
+  // Declared before allowedTabs because the filter callback below reads it immediately.
+  const canManageMakerspace = isSuperadmin || activeRole === "space_manager";
   const allowedTabs: readonly string[] = (fullAccess ? ALL_TABS : PRINTING_TABS).filter((tabName) => {
     if (tabName === "tobuy") return canUseToBuy;
     if (tabName === "needsfix") return canEditInventory;
@@ -217,8 +220,6 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
   // Only the makerspace admin (Space Manager) + superadmin may pick which stream
   // (hardware/printing) a To-Buy item goes to; other roles are auto-tagged.
   const canChooseToBuyKind = isSuperadmin || activeRole === "space_manager";
-  // MANAGE_MAKERSPACE holders (Space Manager + superadmin) manage the tenant-frontend registry.
-  const canManageMakerspace = isSuperadmin || activeRole === "space_manager";
   // Derived (no useEffect): switching makerspace recomputes synchronously, and a
   // tab that isn't allowed for the current role falls back to the first allowed.
   const activeTab = allowedTabs.includes(tab) ? tab : allowedTabs[0];
