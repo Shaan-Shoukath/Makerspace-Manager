@@ -32,10 +32,23 @@ class StockTransferListCreateView(generics.ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         makerspace = get_object_or_404(Makerspace, pk=self.kwargs["makerspace_id"])
         require_module(makerspace, "stock_transfers")
-        if not (request.user.is_superuser or request.user.role == request.user.Role.SUPERADMIN):
-            raise PermissionDenied()
+        # Validate the payload BEFORE the RBAC branch so we can tell an intra-makerspace
+        # relocation (allowed for EDIT_INVENTORY holders) from a cross-makerspace move
+        # (superadmin-only, since it deducts/credits stock across tenants) — and so no
+        # service side effects run for a request the actor isn't allowed to make.
         serializer = StockTransferCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        destination_makerspace_id = (
+            serializer.validated_data.get("destination_makerspace_id") or makerspace.id
+        )
+        is_cross = destination_makerspace_id != makerspace.id
+        if is_cross:
+            if not (request.user.is_superuser or request.user.role == request.user.Role.SUPERADMIN):
+                raise PermissionDenied(
+                    "Only a superadmin can transfer stock between makerspaces."
+                )
+        else:
+            require_action(request.user, rbac.Action.EDIT_INVENTORY, makerspace.id)
         transfer = services.apply_stock_transfer(request.user, makerspace, serializer.validated_data)
         return Response(StockTransferSerializer(transfer).data, status=status.HTTP_201_CREATED)
 

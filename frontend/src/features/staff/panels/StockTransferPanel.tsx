@@ -27,12 +27,17 @@ export function StockTransferPanel({
   makerspace,
   makerspaces,
   isSuperadmin,
+  canEditInventory = false,
 }: {
   makerspace: Makerspace;
   makerspaces: Makerspace[];
   isSuperadmin: boolean;
+  canEditInventory?: boolean;
 }) {
   const queryClient = useQueryClient();
+  // EDIT_INVENTORY holders can run INTRA-makerspace relocations; only a superadmin gets the
+  // source/destination makerspace selectors (cross-makerspace moves are superadmin-only).
+  const canCreate = isSuperadmin || canEditInventory;
   const spaceOptions = makerspaces.length ? makerspaces : [makerspace];
   const [sourceMakerspaceId, setSourceMakerspaceId] = useState(makerspace.id);
   const [destinationMakerspaceId, setDestinationMakerspaceId] = useState(makerspace.id);
@@ -56,7 +61,7 @@ export function StockTransferPanel({
   const products = useStaffGet<ListResponse<Product>>(
     ["inventory", sourceMakerspaceId],
     `/admin/makerspace/${sourceMakerspaceId}/inventory`,
-    isSuperadmin,
+    canCreate,
   );
   const transfers = useStaffGet<ListResponse<Transfer>>(
     ["transfers", sourceMakerspaceId],
@@ -65,12 +70,12 @@ export function StockTransferPanel({
   const sourceContainers = useStaffGet<ListResponse<Container>>(
     ["containers", sourceMakerspaceId],
     `/admin/makerspace/${sourceMakerspaceId}/containers`,
-    isSuperadmin,
+    canCreate,
   );
   const destinationContainers = useStaffGet<ListResponse<Container>>(
     ["containers", destinationMakerspaceId],
     `/admin/makerspace/${destinationMakerspaceId}/containers`,
-    isSuperadmin,
+    canCreate,
   );
 
   const makerspaceNames = useMemo(
@@ -158,9 +163,9 @@ export function StockTransferPanel({
   return (
     <Panel title="Stock transfers">
       <div className="grid gap-4">
-        {!isSuperadmin ? (
+        {!canCreate ? (
           <p className="rounded-md border border-line bg-surface px-3 py-2 text-sm text-muted">
-            Transfers are managed by a Super Admin. This view is read-only.
+            Transfers are managed by inventory staff. This view is read-only.
           </p>
         ) : (
           <form
@@ -171,16 +176,20 @@ export function StockTransferPanel({
             }}
           >
             <div className="grid gap-3 lg:grid-cols-2">
-              <Field label="Source makerspace">
-                <select className="desk-input w-full" value={sourceMakerspaceId} onChange={(event) => changeSource(Number(event.target.value))}>
-                  {spaceOptions.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}
-                </select>
-              </Field>
-              <Field label="Destination makerspace">
-                <select className="desk-input w-full" value={destinationMakerspaceId} onChange={(event) => { setDestinationMakerspaceId(Number(event.target.value)); setDestinationContainerId(""); }}>
-                  {spaceOptions.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}
-                </select>
-              </Field>
+              {isSuperadmin ? (
+                <>
+                  <Field label="Source makerspace">
+                    <select className="desk-input w-full" value={sourceMakerspaceId} onChange={(event) => changeSource(Number(event.target.value))}>
+                      {spaceOptions.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Destination makerspace">
+                    <select className="desk-input w-full" value={destinationMakerspaceId} onChange={(event) => { setDestinationMakerspaceId(Number(event.target.value)); setDestinationContainerId(""); }}>
+                      {spaceOptions.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}
+                    </select>
+                  </Field>
+                </>
+              ) : null}
               <Field label="Source container">
                 <select className="desk-input w-full" value={sourceContainerId} disabled={isCrossMakerspace || sourceContainers.isLoading} onChange={(event) => setSourceContainerId(event.target.value)}>
                   <option value="">Any source container</option>

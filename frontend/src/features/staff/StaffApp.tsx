@@ -316,6 +316,7 @@ export function StaffApp({ guestOnly = false }: { guestOnly?: boolean }) {
               makerspace={activeMakerspace}
               makerspaces={makerspaces.data ?? []}
               isSuperadmin={isSuperadmin}
+              canEditInventory={canEditInventory}
             />
           ) : null}
           {activeMakerspace && activeTab === "stocktake" ? (

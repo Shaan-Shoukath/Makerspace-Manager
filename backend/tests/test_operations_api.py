@@ -98,34 +98,74 @@ def test_cross_makerspace_transfer_rejects_individual_tracking():
     assert response.status_code == 400
 
 
-def test_stock_transfer_is_superadmin_only_and_moves_product_container():
-    makerspace = make_space("ops-transfer")
-    manager = make_member("ops-transfer-manager", makerspace)
-    superadmin = make_user("ops-transfer-super", role=User.Role.SUPERADMIN, access_status=User.AccessStatus.ACTIVE)
-    product = make_product(makerspace)
-    destination = make_box(makerspace, "Destination")
-    payload = {
+def _intra_transfer_payload(product, destination):
+    return {
         "destination_container_id": destination.id,
         "reason": "Move to shelf",
         "lines": [{"product_id": product.id, "quantity": 1}],
     }
 
-    denied = authenticated_client(manager).post(
+
+def test_intra_makerspace_transfer_allowed_for_edit_inventory_manager():
+    # Intra-makerspace relocation (no destination_makerspace_id) is now a manager action
+    # gated on EDIT_INVENTORY — it only moves stock between containers in the same tenant.
+    makerspace = make_space("ops-transfer")
+    manager = make_member("ops-transfer-manager", makerspace)
+    product = make_product(makerspace)
+    destination = make_box(makerspace, "Destination")
+
+    created = authenticated_client(manager).post(
         f"/api/v1/admin/makerspace/{makerspace.id}/stock-transfers",
-        payload,
-        format="json",
-    )
-    created = authenticated_client(superadmin).post(
-        f"/api/v1/admin/makerspace/{makerspace.id}/stock-transfers",
-        payload,
+        _intra_transfer_payload(product, destination),
         format="json",
     )
 
-    assert denied.status_code == 403
     assert created.status_code == 201
     product.refresh_from_db()
     assert product.box_id == destination.id
     assert StockTransfer.objects.count() == 1
+
+
+def test_intra_makerspace_transfer_denied_for_other_makerspace_manager():
+    # Tenant scope: a manager of another makerspace cannot transfer in this one.
+    makerspace = make_space("ops-transfer-own")
+    other = make_space("ops-transfer-other")
+    outsider = make_member("ops-transfer-outsider", other)
+    product = make_product(makerspace)
+    destination = make_box(makerspace, "Destination")
+
+    response = authenticated_client(outsider).post(
+        f"/api/v1/admin/makerspace/{makerspace.id}/stock-transfers",
+        _intra_transfer_payload(product, destination),
+        format="json",
+    )
+
+    assert response.status_code == 403
+    assert StockTransfer.objects.count() == 0
+
+
+def test_cross_makerspace_transfer_denied_for_non_superadmin_with_no_side_effects():
+    # Cross-makerspace moves stay superadmin-only; a manager attempt must 403 BEFORE any
+    # stock is deducted from the source product.
+    source = make_space("ops-xfer-src")
+    dest = make_space("ops-xfer-dst")
+    manager = make_member("ops-xfer-manager", source)
+    product = make_product(source, name="Heat Gun", total_quantity=10, available_quantity=10)
+
+    response = authenticated_client(manager).post(
+        f"/api/v1/admin/makerspace/{source.id}/stock-transfers",
+        {
+            "destination_makerspace_id": dest.id,
+            "reason": "Lend to partner space",
+            "lines": [{"product_id": product.id, "quantity": 2}],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 403
+    product.refresh_from_db()
+    assert product.available_quantity == 10  # untouched
+    assert StockTransfer.objects.count() == 0
 
 
 def test_stocktake_lifecycle_applies_superadmin_adjustment():
