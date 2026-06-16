@@ -1,8 +1,7 @@
 import uuid
 
 from django.conf import settings
-from django.core.validators import FileExtensionValidator
-from django.core.validators import MinValueValidator
+from django.core.validators import FileExtensionValidator, MinValueValidator
 from django.db import models
 
 
@@ -106,6 +105,44 @@ class FilamentSpool(models.Model):
     def __str__(self):
         color = f" {self.color}" if self.color else ""
         return f"{self.material}{color} ({self.remaining_weight_grams}g left)"
+
+
+class ManualPrintLog(models.Model):
+    makerspace = models.ForeignKey(
+        "makerspaces.Makerspace",
+        on_delete=models.CASCADE,
+        related_name="manual_print_logs",
+    )
+    printer = models.ForeignKey(
+        PrintPrinter,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="manual_print_logs",
+    )
+    filament_spool = models.ForeignKey(
+        FilamentSpool,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="manual_print_logs",
+    )
+    grams_used = models.DecimalField(max_digits=8, decimal_places=2)
+    title = models.CharField(max_length=200)
+    note = models.TextField(blank=True)
+    logged_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.title} ({self.grams_used}g)"
 
 
 class PrintRequest(models.Model):

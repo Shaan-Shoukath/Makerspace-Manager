@@ -4,7 +4,7 @@ from django.db.models import Count, Sum
 from django.db.models.functions import TruncDay, TruncHour, TruncMonth
 
 from apps.accounts import rbac
-from apps.printing.models import FilamentSpool, PrintRequest
+from apps.printing.models import FilamentSpool, ManualPrintLog, PrintRequest
 
 
 STATUS_KEYS = {
@@ -22,19 +22,26 @@ COMPLETED_STATUSES = [PrintRequest.Status.COMPLETED, PrintRequest.Status.COLLECT
 def build_printing_report(makerspace_id=None, *, include_makerspace=False):
     requests = PrintRequest.objects.all()
     spools = FilamentSpool.objects.all()
+    manual_logs = ManualPrintLog.objects.all()
     if makerspace_id is not None:
         requests = requests.filter(bucket__makerspace_id=makerspace_id)
         spools = spools.filter(makerspace_id=makerspace_id)
+        manual_logs = manual_logs.filter(makerspace_id=makerspace_id)
     else:
         hidden = rbac.superadmin_hidden_makerspace_ids()
         if hidden:
             requests = requests.exclude(bucket__makerspace_id__in=hidden)
             spools = spools.exclude(makerspace_id__in=hidden)
+            manual_logs = manual_logs.exclude(makerspace_id__in=hidden)
 
     return {
         "totals": _totals(requests),
         "printer_hours": _printer_hours(requests, include_makerspace),
-        "printer_outcomes": _printer_outcomes(requests, include_makerspace),
+        "printer_outcomes": _printer_outcomes(
+            requests,
+            include_makerspace,
+            manual_logs,
+        ),
         "filament_used": _filament_used(spools, include_makerspace),
         "filament_by_brand": _filament_by_brand(spools),
         "top_requesters": _top_requesters(requests, include_makerspace),
@@ -93,7 +100,7 @@ def _printer_hours(requests, include_makerspace):
     return data
 
 
-def _printer_outcomes(requests, include_makerspace):
+def _printer_outcomes(requests, include_makerspace, manual_logs=None):
     from django.db.models import Q
     from django.db.models.functions import Coalesce
 
@@ -114,6 +121,7 @@ def _printer_outcomes(requests, include_makerspace):
         .order_by("printer__makerspace_id", "printer__name", "printer_id")
     )
     data = []
+    by_printer = {}
     for row in rows:
         item = {
             "printer_id": row["printer_id"],
@@ -121,6 +129,43 @@ def _printer_outcomes(requests, include_makerspace):
             "completed": row["completed"],
             "failed": row["failed"],
             "grams_used": _decimal_to_float(row["grams_used"]),
+            "manual_logs": 0,
+        }
+        if include_makerspace:
+            item["makerspace_id"] = row["printer__makerspace_id"]
+        data.append(item)
+        by_printer[row["printer_id"]] = item
+    if manual_logs is None:
+        return data
+    values = ["printer_id", "printer__name"]
+    if include_makerspace:
+        values.append("printer__makerspace_id")
+    manual_rows = (
+        manual_logs.filter(printer__isnull=False)
+        .values(*values)
+        .annotate(
+            manual_grams=Coalesce(Sum("grams_used"), Decimal("0")),
+            manual_count=Count("id"),
+        )
+        .order_by("printer__makerspace_id", "printer__name", "printer_id")
+    )
+    for row in manual_rows:
+        printer_id = row["printer_id"]
+        manual_grams = row["manual_grams"] or Decimal("0")
+        if printer_id in by_printer:
+            item = by_printer[printer_id]
+            item["grams_used"] = _decimal_to_float(
+                Decimal(str(item["grams_used"])) + manual_grams
+            )
+            item["manual_logs"] = row["manual_count"]
+            continue
+        item = {
+            "printer_id": printer_id,
+            "printer_name": row["printer__name"],
+            "completed": 0,
+            "failed": 0,
+            "grams_used": _decimal_to_float(manual_grams),
+            "manual_logs": row["manual_count"],
         }
         if include_makerspace:
             item["makerspace_id"] = row["printer__makerspace_id"]

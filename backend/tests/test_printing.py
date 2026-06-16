@@ -763,6 +763,7 @@ def test_printer_outcomes_in_report():
             "completed": 1,
             "failed": 1,
             "grams_used": 140.0,
+            "manual_logs": 0,
         }
     ]
 

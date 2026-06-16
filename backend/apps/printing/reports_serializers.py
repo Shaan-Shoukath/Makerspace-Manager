@@ -26,6 +26,7 @@ class PrintingReportPrinterOutcomeSerializer(serializers.Serializer):
     completed = serializers.IntegerField()
     failed = serializers.IntegerField()
     grams_used = serializers.FloatField()
+    manual_logs = serializers.IntegerField()
     makerspace_id = serializers.IntegerField(required=False)
 
 

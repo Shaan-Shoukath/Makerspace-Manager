@@ -144,6 +144,7 @@ export const openApiPaths = [
   "/api/v1/printing/admin/printing/reports",
   "/api/v1/printing/buckets/",
   "/api/v1/printing/manage/files/{id}/url",
+  "/api/v1/printing/manage/manual-logs/",
   "/api/v1/printing/manage/printed/",
   "/api/v1/printing/manage/printers/",
   "/api/v1/printing/manage/printers/{id}/",

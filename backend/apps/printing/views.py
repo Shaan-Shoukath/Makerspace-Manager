@@ -6,11 +6,18 @@ from rest_framework.response import Response
 from apps.accounts import rbac
 from apps.makerspaces.guards import require_module
 from apps.printing import workflow
-from apps.printing.models import FilamentSpool, PrintBucket, PrintPrinter, PrintRequest
+from apps.printing.models import (
+    FilamentSpool,
+    ManualPrintLog,
+    PrintBucket,
+    PrintPrinter,
+    PrintRequest,
+)
 from apps.printing.permissions import CanManagePrinting, IsActiveRequester
 from apps.printing.serializers import (
     ErrorSerializer,
     FilamentSpoolSerializer,
+    ManualPrintLogSerializer,
     PrintBucketSerializer,
     PrintPrinterSerializer,
     PrintRequestCreateSerializer,
@@ -20,6 +27,7 @@ from apps.printing.serializers import (
 )
 from apps.printing.views_buckets import PrintBucketListView
 from apps.printing.views_common import ACTION_RESPONSES, ERROR_RESPONSES, _int_query_param
+from apps.printing.views_manual_logs import ManualPrintLogListCreateView
 from apps.printing.views_printers import (
     ManagedPrinterDetailView,
     ManagedPrinterListCreateView,
@@ -57,6 +65,9 @@ __all__ = [
     "FilamentSpool",
     "FilamentSpoolSerializer",
     "IsActiveRequester",
+    "ManualPrintLog",
+    "ManualPrintLogListCreateView",
+    "ManualPrintLogSerializer",
     "ManagedFilamentSpoolDetailView",
     "ManagedFilamentSpoolListCreateView",
     "ManagedPrintFileUrlView",

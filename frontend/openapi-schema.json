@@ -6536,6 +6536,139 @@
                 }
             }
         },
+        "/api/v1/printing/manage/manual-logs/": {
+            "get": {
+                "operationId": "api_v1_printing_manage_manual_logs_list",
+                "summary": "List or create manual 3D print logs",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "makerspace",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "printer",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "tags": [
+                    "Printing"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedManualPrintLogList"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        },
+                        "description": "Invalid request."
+                    },
+                    "401": {
+                        "description": "Authentication credentials were not provided."
+                    },
+                    "403": {
+                        "description": "Permission denied."
+                    },
+                    "404": {
+                        "description": "Not found."
+                    }
+                }
+            },
+            "post": {
+                "operationId": "api_v1_printing_manage_manual_logs_create",
+                "summary": "List or create manual 3D print logs",
+                "tags": [
+                    "Printing"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ManualPrintLog"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ManualPrintLog"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ManualPrintLog"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ManualPrintLog"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        },
+                        "description": "Invalid request."
+                    },
+                    "401": {
+                        "description": "Authentication credentials were not provided."
+                    },
+                    "403": {
+                        "description": "Permission denied."
+                    },
+                    "404": {
+                        "description": "Not found."
+                    }
+                }
+            }
+        },
         "/api/v1/printing/manage/printed/": {
             "get": {
                 "operationId": "api_v1_printing_manage_printed_list",
@@ -11656,6 +11789,69 @@
                     "updated_at"
                 ]
             },
+            "ManualPrintLog": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "makerspace_id": {
+                        "type": "integer"
+                    },
+                    "printer_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "filament_spool_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "grams_used": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,6}(?:\\.\\d{0,2})?$"
+                    },
+                    "title": {
+                        "type": "string",
+                        "maxLength": 200
+                    },
+                    "note": {
+                        "type": "string"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "printer_name": {
+                        "type": "string",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "spool_label": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "logged_by_username": {
+                        "type": "string",
+                        "readOnly": true,
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "created_at",
+                    "filament_spool_id",
+                    "grams_used",
+                    "id",
+                    "logged_by_username",
+                    "makerspace_id",
+                    "printer_id",
+                    "printer_name",
+                    "spool_label",
+                    "title"
+                ]
+            },
             "NeedsFixAction": {
                 "type": "object",
                 "properties": {
@@ -11978,6 +12174,37 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/ManagedPrintRequest"
+                        }
+                    }
+                }
+            },
+            "PaginatedManualPrintLogList": {
+                "type": "object",
+                "required": [
+                    "count",
+                    "results"
+                ],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ManualPrintLog"
                         }
                     }
                 }
@@ -13829,6 +14056,9 @@
                         "type": "number",
                         "format": "double"
                     },
+                    "manual_logs": {
+                        "type": "integer"
+                    },
                     "makerspace_id": {
                         "type": "integer"
                     }
@@ -13837,6 +14067,7 @@
                     "completed",
                     "failed",
                     "grams_used",
+                    "manual_logs",
                     "printer_id",
                     "printer_name"
                 ]

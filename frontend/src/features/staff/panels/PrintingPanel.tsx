@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { Panel, type Makerspace, useStaffGet } from "./shared";
+import { ManualPrintLogSection } from "./ManualPrintLogSection";
 import {
   ErrorText,
   type FilamentSpool,
@@ -217,6 +218,12 @@ export function PrintingPanel({ makerspace }: { makerspace: Makerspace }) {
         <ErrorText message={deleteSpool.error instanceof Error ? deleteSpool.error.message : undefined} />
         <ErrorText message={activateSpool.error instanceof Error ? activateSpool.error.message : undefined} />
       </Panel>
+
+      <ManualPrintLogSection
+        makerspace={makerspace}
+        printers={printerRows}
+        spools={spoolRows}
+      />
 
       <PrinterEditDialog
         printer={editingPrinter}

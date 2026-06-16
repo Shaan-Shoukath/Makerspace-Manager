@@ -1,8 +1,15 @@
 from rest_framework import serializers
 
 from apps.makerspaces.models import Makerspace
-from apps.printing.models import FilamentSpool, PrintBucket, PrintPrinter, PrintRequest
+from apps.printing.models import (
+    FilamentSpool,
+    ManualPrintLog,
+    PrintBucket,
+    PrintPrinter,
+    PrintRequest,
+)
 from apps.printing.serializers_buckets import ErrorSerializer, PrintBucketSerializer
+from apps.printing.serializers_manual_logs import ManualPrintLogSerializer
 from apps.printing.serializers_printers import PrintPrinterSerializer
 from apps.printing.serializers_requests import (
     FailPrintSerializer,
@@ -24,6 +31,8 @@ __all__ = [
     "FailPrintSerializer",
     "FilamentSpoolSerializer",
     "FilamentSpoolSummarySerializer",
+    "ManualPrintLog",
+    "ManualPrintLogSerializer",
     "ManagedPrintRequestSerializer",
     "Makerspace",
     "PrintBucket",
