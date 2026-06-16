@@ -114,8 +114,14 @@ class PrintRequest(models.Model):
         ACCEPTED = "accepted", "Accepted"
         PRINTING = "printing", "Printing"
         COMPLETED = "completed", "Completed"
+        COLLECTED = "collected", "Collected"
         REJECTED = "rejected", "Rejected"
         FAILED = "failed", "Failed"
+
+    class PaymentStatus(models.TextChoices):
+        NONE = "none", "None"
+        PENDING = "pending", "Pending"
+        PAID = "paid", "Paid"
 
     bucket = models.ForeignKey(
         PrintBucket,
@@ -190,6 +196,27 @@ class PrintRequest(models.Model):
         decimal_places=2,
         default=0,
         validators=[MinValueValidator(0)],
+    )
+    price = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    payment_status = models.CharField(
+        max_length=16,
+        choices=PaymentStatus.choices,
+        default=PaymentStatus.NONE,
+        db_index=True,
+    )
+    paid_at = models.DateTimeField(null=True, blank=True)
+    collected_at = models.DateTimeField(null=True, blank=True)
+    collected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="collected_print_requests",
     )
     filament_grams_used = models.DecimalField(
         max_digits=8,

@@ -148,6 +148,7 @@ export const openApiPaths = [
   "/api/v1/printing/manage/requests/",
   "/api/v1/printing/manage/requests/{id}/",
   "/api/v1/printing/manage/requests/{id}/accept",
+  "/api/v1/printing/manage/requests/{id}/collect",
   "/api/v1/printing/manage/requests/{id}/complete",
   "/api/v1/printing/manage/requests/{id}/fail",
   "/api/v1/printing/manage/requests/{id}/reject",

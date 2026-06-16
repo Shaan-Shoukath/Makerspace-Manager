@@ -4,6 +4,7 @@ from rest_framework import serializers
 class PrintingReportTotalsSerializer(serializers.Serializer):
     total_requests = serializers.IntegerField()
     completed = serializers.IntegerField()
+    collected = serializers.IntegerField()
     failed = serializers.IntegerField()
     rejected = serializers.IntegerField()
     pending = serializers.IntegerField()
@@ -62,6 +63,13 @@ class PrintingReportTopRequesterSerializer(serializers.Serializer):
     makerspace_id = serializers.IntegerField(required=False)
 
 
+class PrintingReportPaymentsSerializer(serializers.Serializer):
+    paid_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    paid_count = serializers.IntegerField()
+    outstanding_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    outstanding_count = serializers.IntegerField()
+
+
 class PrintingReportSerializer(serializers.Serializer):
     totals = PrintingReportTotalsSerializer()
     printer_hours = PrintingReportPrinterHoursSerializer(many=True)
@@ -70,4 +78,5 @@ class PrintingReportSerializer(serializers.Serializer):
     filament_by_brand = PrintingReportBrandSerializer(many=True)
     top_requesters = PrintingReportTopRequesterSerializer(many=True)
     total_grams_used = serializers.FloatField()
+    payments = PrintingReportPaymentsSerializer()
     filament_estimated_by_period = PrintingReportPeriodsSerializer()

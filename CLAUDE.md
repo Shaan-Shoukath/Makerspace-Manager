@@ -2,6 +2,44 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Recent batch — staff-private cash payment on 3D print requests (2026-06-16)
+
+Lets the print manager charge cash for a print, collected on trust at handover, **never exposed to
+the requester** (Codex plan-reviewed; 466 backend tests green). One migration (`printing/0008`):
+
+- **Model.** `PrintRequest` gains `price` (`Decimal(8,2)`, default 0, ≥0 — `0` = free), `payment_status`
+  (`none`/`pending`/`paid`, default `none`), `paid_at`, `collected_at`, `collected_by` (FK user,
+  SET_NULL), and a new terminal status **`COLLECTED`**. The lifecycle is now
+  `pending → accepted(price set) → printing → completed → collected`; `accepted` still doubles as the
+  "waiting to be printed" queue and `failed`/`rejected` stay terminal + non-collectable.
+- **Workflow (single source of truth, atomic/row-locked/audited).** `workflow.accept(pr, actor, *,
+  price=0)` validates + stores the price (Django-admin `accept_selected` passes 0 = free). `complete`
+  sets `payment_status = pending if price>0 else none` (status stays `completed` = "ready to collect").
+  New `mark_collected(pr, actor)`: `completed → collected`, always sets `collected_at`+`collected_by`;
+  if `price>0` sets `payment_status=paid`+`paid_at`; audited `print.collected`, **no email**. `reprint`
+  clones carry `price` with `payment_status` reset to `none`.
+- **Privacy = serializer split (the load-bearing rule).** `PrintRequestSerializer` is shared by the
+  requester AND public-status surfaces, so it stays **price-free**. A new
+  `ManagedPrintRequestSerializer(PrintRequestSerializer)` adds `price`/`payment_status`/`paid_at`/
+  `collected_at`/`collected_by` and is used **only** by the `/printing/manage/...` staff endpoints +
+  action responses. New `PrintAcceptSerializer` (`DecimalField` price). New endpoint
+  `POST /printing/manage/requests/<id>/collect` (`MANAGE_PRINTING`). Tests assert price never leaks to
+  the requester list/detail, the public token status, status-by-email, or the text/HTML emails.
+- **Reports.** Production metrics (printer hours, outcomes, filament-by-period) now count
+  `status__in=[COMPLETED, COLLECTED]` (a collected print was still produced). New `payments` block —
+  `paid_amount`/`paid_count`/`outstanding_amount`/`outstanding_count` (amounts as **Decimal**, not
+  float) — per-makerspace and in the superadmin aggregate, respecting the soft-hide. Also fixed a
+  **pre-existing soft-hide bypass**: `MakerspacePrintingReportView` now 404s when a superadmin queries
+  a `superadmin_access_enabled=False` makerspace's report by id (the aggregate path already excluded it).
+- **Frontend.** Accept opens an `AcceptPrintDialog` (price input, 0 = free); the staff queue gains an
+  always-visible **"Ready for collection"** section (completed requests) with a **Mark collected**
+  action and a payment badge (Free / Payment due / Paid); history now lists Collected/Rejected/Failed.
+  The public stepper gains a **Collected** step (no price shown). The 3D-printing report panel shows a
+  **Payments** sub-section (Collected vs Outstanding) + a Collected stat/pie slice.
+- Also fixed (Codex P2 from the prior batch): `ApiClientSerializer` now drops the privileged
+  `client_type`/`scopes`/`rate_limit_tier` for non-superadmins, so a makerspace admin using the new
+  self-serve API-client surface can't escalate to a `trusted` tier or add `admin:write` scopes.
+
 ## Recent batch — collaborative-makerspace self-governance (2026-06-16)
 
 Lets a collaborating makerspace operate independently of the superadmin. Five features (Codex

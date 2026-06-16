@@ -91,6 +91,28 @@ export function FailPrintDialog({ open, pending, error, onClose, onSubmit, title
   );
 }
 
+export function AcceptPrintDialog({ open, pending, error, onClose, onSubmit }: {
+  open: boolean;
+  pending: boolean;
+  error?: string;
+  onClose: () => void;
+  onSubmit: (price: string) => void;
+}) {
+  const [price, setPrice] = useState("0");
+  useEffect(() => { if (open) setPrice("0"); }, [open]);
+  const priceValue = Number(price);
+  const disabled = !price.trim() || !Number.isFinite(priceValue) || priceValue < 0;
+  return (
+    <Modal open={open} onClose={onClose} title="Accept print request" footer={<DialogActions pending={pending} disabled={disabled} submitLabel="Accept request" onCancel={onClose} onSubmit={() => onSubmit(price.trim() || "0")} />}>
+      <label className="block">
+        <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted">Price (cash) &mdash; 0 = free</span>
+        <input className="desk-input w-full" type="number" min="0" step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} />
+      </label>
+      <ErrorText message={error} />
+    </Modal>
+  );
+}
+
 function PrinterFields({ form, onChange }: { form: PrinterPayload; onChange: (form: PrinterPayload) => void }) {
   return (
     <div className="grid gap-3">

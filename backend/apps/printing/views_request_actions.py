@@ -7,7 +7,8 @@ from apps.printing import workflow
 from apps.printing.permissions import CanManagePrinting
 from apps.printing.serializers import (
     FailPrintSerializer,
-    PrintRequestSerializer,
+    ManagedPrintRequestSerializer,
+    PrintAcceptSerializer,
     PrintStartSerializer,
     RejectFailSerializer,
 )
@@ -17,7 +18,7 @@ from apps.printing.views_requests import ManagedPrintRequestQuerysetMixin
 
 class PrintRequestActionView(ManagedPrintRequestQuerysetMixin, generics.GenericAPIView):
     permission_classes = [CanManagePrinting]
-    serializer_class = PrintRequestSerializer
+    serializer_class = ManagedPrintRequestSerializer
     action = None
     request_serializer_class = None
 
@@ -31,7 +32,11 @@ class PrintRequestActionView(ManagedPrintRequestQuerysetMixin, generics.GenericA
 
         try:
             if self.action == "accept":
-                updated = workflow.accept(print_request, request.user)
+                updated = workflow.accept(
+                    print_request,
+                    request.user,
+                    price=input_serializer.validated_data["price"],
+                )
             elif self.action == "reject":
                 updated = workflow.reject(
                     print_request,
@@ -60,21 +65,30 @@ class PrintRequestActionView(ManagedPrintRequestQuerysetMixin, generics.GenericA
                         0,
                     ),
                 )
+            elif self.action == "collect":
+                updated = workflow.mark_collected(print_request, request.user)
             else:
                 raise AssertionError("Unknown print action.")
         except workflow.InvalidTransition as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
 
         return Response(
-            PrintRequestSerializer(updated, context=self.get_serializer_context()).data
+            ManagedPrintRequestSerializer(
+                updated,
+                context=self.get_serializer_context(),
+            ).data
         )
 
 
 @extend_schema(tags=["Printing"], summary="Accept print request")
 class PrintRequestAcceptView(PrintRequestActionView):
     action = "accept"
+    request_serializer_class = PrintAcceptSerializer
 
-    @extend_schema(request=None, responses={200: PrintRequestSerializer, **ACTION_RESPONSES})
+    @extend_schema(
+        request=PrintAcceptSerializer,
+        responses={200: ManagedPrintRequestSerializer, **ACTION_RESPONSES},
+    )
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
 
@@ -86,7 +100,7 @@ class PrintRequestRejectView(PrintRequestActionView):
 
     @extend_schema(
         request=RejectFailSerializer,
-        responses={200: PrintRequestSerializer, **ACTION_RESPONSES},
+        responses={200: ManagedPrintRequestSerializer, **ACTION_RESPONSES},
     )
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
@@ -99,7 +113,7 @@ class PrintRequestStartView(PrintRequestActionView):
 
     @extend_schema(
         request=PrintStartSerializer,
-        responses={200: PrintRequestSerializer, **ACTION_RESPONSES},
+        responses={200: ManagedPrintRequestSerializer, **ACTION_RESPONSES},
     )
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
@@ -109,7 +123,10 @@ class PrintRequestStartView(PrintRequestActionView):
 class PrintRequestCompleteView(PrintRequestActionView):
     action = "complete"
 
-    @extend_schema(request=None, responses={200: PrintRequestSerializer, **ACTION_RESPONSES})
+    @extend_schema(
+        request=None,
+        responses={200: ManagedPrintRequestSerializer, **ACTION_RESPONSES},
+    )
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
 
@@ -121,7 +138,19 @@ class PrintRequestFailView(PrintRequestActionView):
 
     @extend_schema(
         request=FailPrintSerializer,
-        responses={200: PrintRequestSerializer, **ACTION_RESPONSES},
+        responses={200: ManagedPrintRequestSerializer, **ACTION_RESPONSES},
+    )
+    def post(self, request, *args, **kwargs):
+        return super().post(request, *args, **kwargs)
+
+
+@extend_schema(tags=["Printing"], summary="Collect print request")
+class PrintRequestCollectView(PrintRequestActionView):
+    action = "collect"
+
+    @extend_schema(
+        request=None,
+        responses={200: ManagedPrintRequestSerializer, **ACTION_RESPONSES},
     )
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
@@ -131,14 +160,14 @@ class PrintRequestFailView(PrintRequestActionView):
     tags=["Printing"],
     summary="Reprint a failed print request",
     request=None,
-    responses={201: PrintRequestSerializer, **ACTION_RESPONSES},
+    responses={201: ManagedPrintRequestSerializer, **ACTION_RESPONSES},
 )
 class PrintRequestReprintView(
     ManagedPrintRequestQuerysetMixin,
     generics.GenericAPIView,
 ):
     permission_classes = [CanManagePrinting]
-    serializer_class = PrintRequestSerializer
+    serializer_class = ManagedPrintRequestSerializer
 
     def post(self, request, *args, **kwargs):
         print_request = self.get_object()
@@ -148,6 +177,9 @@ class PrintRequestReprintView(
         except workflow.InvalidTransition as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(
-            PrintRequestSerializer(updated, context=self.get_serializer_context()).data,
+            ManagedPrintRequestSerializer(
+                updated,
+                context=self.get_serializer_context(),
+            ).data,
             status=status.HTTP_201_CREATED,
         )

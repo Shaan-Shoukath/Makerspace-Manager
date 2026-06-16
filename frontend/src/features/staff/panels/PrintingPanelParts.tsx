@@ -37,6 +37,11 @@ export type PrintRequest = {
   title: string;
   requester_username: string;
   status: string;
+  price?: string;
+  payment_status?: "none" | "pending" | "paid";
+  paid_at?: string | null;
+  collected_at?: string | null;
+  collected_by?: number | null;
   material: string;
   color: string;
   estimated_minutes: number;
@@ -195,6 +200,23 @@ function Row({ label, value }: { label: string; value: string }) {
   return <div className="flex justify-between gap-2"><dt>{label}</dt><dd className="text-right">{value}</dd></div>;
 }
 
+function PaymentBadge({ request }: { request: PrintRequest }) {
+  if (request.payment_status === undefined) return null;
+  const price = request.price ?? "0";
+  if (request.payment_status === "paid") {
+    return <span className="rounded-md bg-success/15 px-2 py-0.5 text-xs font-semibold text-success">Paid {price}</span>;
+  }
+  if (request.payment_status === "pending") {
+    return <span className="rounded-md bg-warn/15 px-2 py-0.5 text-xs font-semibold text-warn">Payment due {price}</span>;
+  }
+  // payment_status === "none": a truly zero-priced request is Free; a priced request that
+  // hasn't reached completion (where payment becomes due) shows its price, NOT "Free".
+  if (Number(price) > 0) {
+    return <span className="rounded-md bg-accent/15 px-2 py-0.5 text-xs font-semibold text-accent">Price {price}</span>;
+  }
+  return <span className="rounded-md border border-line bg-bg px-2 py-0.5 text-xs font-semibold text-muted">Free</span>;
+}
+
 export function SpoolRow({
   spool,
   onEdit,
@@ -266,6 +288,7 @@ export function PrintRows({
             <div className="flex flex-wrap items-center gap-2">
               <strong className="text-ink">#{row.id} {row.title}</strong>
               <span className="rounded-md border border-line bg-bg px-2 py-0.5 text-xs text-muted">{row.status}</span>
+              <PaymentBadge request={row} />
               <div className="desk-actions ml-auto flex flex-wrap gap-2 text-sm">{action(row)}</div>
             </div>
             <p className="mt-2 text-xs text-muted">

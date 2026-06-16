@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
@@ -14,42 +14,34 @@ class InvalidTransition(Exception):
 
 
 _ALLOWED = {
-    PrintRequest.Status.PENDING: {
-        PrintRequest.Status.ACCEPTED,
-        PrintRequest.Status.REJECTED,
-    },
+    PrintRequest.Status.PENDING: {PrintRequest.Status.ACCEPTED, PrintRequest.Status.REJECTED},
     PrintRequest.Status.ACCEPTED: {PrintRequest.Status.PRINTING},
-    PrintRequest.Status.PRINTING: {
-        PrintRequest.Status.COMPLETED,
-        PrintRequest.Status.FAILED,
-    },
+    PrintRequest.Status.PRINTING: {PrintRequest.Status.COMPLETED, PrintRequest.Status.FAILED},
+    PrintRequest.Status.COMPLETED: {PrintRequest.Status.COLLECTED},
 }
 
 
+def _locked_request(pk, *related):
+    qs = PrintRequest.objects.select_for_update()
+    if related:
+        qs = qs.select_related(*related)
+    return qs.get(pk=pk)
+
+
 def _transition(
-    print_request,
-    actor,
-    status,
-    event,
-    reason="",
-    printer_id=None,
-    filament_spool_id=None,
-    estimated_minutes=None,
-    estimated_filament_grams=None,
-    percent_complete=0,
+    print_request, actor, status, event, reason="", printer_id=None,
+    filament_spool_id=None, estimated_minutes=None,
+    estimated_filament_grams=None, percent_complete=0, price=0,
 ):
     with transaction.atomic():
-        locked = (
-            PrintRequest.objects.select_for_update()
-            .select_related("bucket__makerspace", "requester")
-            .get(pk=print_request.pk)
-        )
+        locked = _locked_request(print_request.pk, "bucket__makerspace", "requester")
         if status not in _ALLOWED.get(locked.status, set()):
             raise InvalidTransition(
                 f"Cannot transition print request from {locked.status} to {status}."
             )
 
         extra_update_fields = []
+        now = timezone.now()
         if status == PrintRequest.Status.PRINTING:
             _assign_print_job(
                 locked,
@@ -58,56 +50,44 @@ def _transition(
                 estimated_minutes=estimated_minutes,
                 estimated_filament_grams=estimated_filament_grams,
             )
-            locked.started_at = timezone.now()
+            locked.started_at = now
             extra_update_fields.extend(
-                [
-                    "printer",
-                    "filament_spool",
-                    "estimated_minutes",
-                    "estimated_filament_grams",
-                    "started_at",
-                ]
+                ["printer", "filament_spool", "estimated_minutes",
+                 "estimated_filament_grams", "started_at"]
             )
 
         locked.status = status
         locked.handled_by = actor
         if status == PrintRequest.Status.ACCEPTED:
-            locked.accepted_at = timezone.now()
+            locked.accepted_at = now
+            locked.price = _coerce_price(price)
+            extra_update_fields.append("price")
         if status == PrintRequest.Status.COMPLETED:
-            locked.completed_at = timezone.now()
+            locked.completed_at = now
+            locked.payment_status = (
+                PrintRequest.PaymentStatus.PENDING
+                if locked.price and locked.price > 0
+                else PrintRequest.PaymentStatus.NONE
+            )
+            extra_update_fields.append("payment_status")
         if status in (PrintRequest.Status.REJECTED, PrintRequest.Status.FAILED):
             locked.reason = reason
 
         locked.save(
             update_fields=[
-                "status",
-                "handled_by",
-                "accepted_at",
-                "started_at",
-                "completed_at",
-                "reason",
-                "updated_at",
+                "status", "handled_by", "accepted_at", "started_at",
+                "completed_at", "reason", "updated_at",
             ]
             + extra_update_fields
         )
-        audit.record(
-            actor,
-            f"print.{event}",
-            makerspace=locked.bucket.makerspace,
-            target=locked,
-        )
+        audit.record(actor, f"print.{event}", makerspace=locked.bucket.makerspace, target=locked)
         if (
             status == PrintRequest.Status.COMPLETED
             and locked.filament_spool_id
             and locked.estimated_filament_grams
             and locked.estimated_filament_grams > 0
         ):
-            _deduct_spool(
-                actor,
-                locked,
-                locked.estimated_filament_grams,
-                reason="completed",
-            )
+            _deduct_spool(actor, locked, locked.estimated_filament_grams, reason="completed")
         elif (
             status == PrintRequest.Status.FAILED
             and locked.filament_spool_id
@@ -148,23 +128,27 @@ def _deduct_spool(actor, locked, grams, *, reason):
         makerspace=locked.bucket.makerspace,
         target=spool,
         meta={
-            "spool_id": spool.id,
-            "deducted_grams": str(grams),
+            "spool_id": spool.id, "deducted_grams": str(grams),
             "remaining_before": str(remaining_before),
             "remaining_after": str(spool.remaining_weight_grams),
-            "print_request_id": locked.id,
-            "reason": reason,
+            "print_request_id": locked.id, "reason": reason,
         },
     )
 
 
+def _coerce_price(price):
+    try:
+        value = Decimal(str(price if price is not None else 0))
+    except (InvalidOperation, ValueError) as exc:
+        raise InvalidTransition("Price must be a valid decimal value.") from exc
+    if not value.is_finite() or value < 0:
+        raise InvalidTransition("Price must be a finite decimal value greater than or equal to 0.")
+    return value
+
+
 def _assign_print_job(
-    print_request,
-    *,
-    printer_id,
-    filament_spool_id,
-    estimated_minutes,
-    estimated_filament_grams,
+    print_request, *, printer_id, filament_spool_id,
+    estimated_minutes, estimated_filament_grams,
 ):
     if printer_id is not None:
         try:
@@ -186,7 +170,10 @@ def _assign_print_job(
             raise InvalidTransition("Filament spool was not found.") from exc
         if spool.makerspace_id != print_request.bucket.makerspace_id:
             raise InvalidTransition("Filament spool must belong to the request makerspace.")
-        if print_request.printer_id and spool.printer_id not in (None, print_request.printer_id):
+        if (
+            print_request.printer_id
+            and spool.printer_id not in (None, print_request.printer_id)
+        ):
             raise InvalidTransition("Filament spool is assigned to a different printer.")
         if not spool.is_active:
             raise InvalidTransition("Filament spool is not active.")
@@ -206,33 +193,15 @@ def _assign_print_job(
         raise InvalidTransition("Estimated filament exceeds remaining spool weight.")
 
 
-def accept(print_request, actor):
-    return _transition(
-        print_request,
-        actor,
-        PrintRequest.Status.ACCEPTED,
-        "accepted",
-    )
-
+def accept(print_request, actor, *, price=0):
+    return _transition(print_request, actor, PrintRequest.Status.ACCEPTED, "accepted", price=price)
 
 def reject(print_request, actor, reason):
-    return _transition(
-        print_request,
-        actor,
-        PrintRequest.Status.REJECTED,
-        "rejected",
-        reason=reason,
-    )
-
+    return _transition(print_request, actor, PrintRequest.Status.REJECTED, "rejected", reason=reason)
 
 def start(
-    print_request,
-    actor,
-    *,
-    printer_id=None,
-    filament_spool_id=None,
-    estimated_minutes=None,
-    estimated_filament_grams=None,
+    print_request, actor, *, printer_id=None, filament_spool_id=None,
+    estimated_minutes=None, estimated_filament_grams=None,
 ):
     return _transition(
         print_request,
@@ -245,41 +214,51 @@ def start(
         estimated_filament_grams=estimated_filament_grams,
     )
 
-
 def complete(print_request, actor):
-    return _transition(
-        print_request,
-        actor,
-        PrintRequest.Status.COMPLETED,
-        "completed",
-    )
-
+    return _transition(print_request, actor, PrintRequest.Status.COMPLETED, "completed")
 
 def fail(print_request, actor, reason, percent_complete=0):
     return _transition(
-        print_request,
-        actor,
-        PrintRequest.Status.FAILED,
-        "failed",
-        reason=reason,
-        percent_complete=percent_complete,
+        print_request, actor, PrintRequest.Status.FAILED, "failed",
+        reason=reason, percent_complete=percent_complete,
     )
+
+def mark_collected(print_request, actor):
+    with transaction.atomic():
+        locked = _locked_request(print_request.pk, "bucket__makerspace")
+        if PrintRequest.Status.COLLECTED not in _ALLOWED.get(locked.status, set()):
+            raise InvalidTransition(
+                f"Cannot transition print request from {locked.status} to collected."
+            )
+
+        now = timezone.now()
+        locked.status = PrintRequest.Status.COLLECTED
+        locked.collected_at = now
+        locked.collected_by = actor
+        locked.handled_by = actor
+        update_fields = ["status", "collected_at", "collected_by", "handled_by", "updated_at"]
+        if locked.price and locked.price > 0:
+            locked.payment_status = PrintRequest.PaymentStatus.PAID
+            locked.paid_at = now
+            update_fields.extend(["payment_status", "paid_at"])
+
+        locked.save(update_fields=update_fields)
+        audit.record(
+            actor,
+            "print.collected",
+            makerspace=locked.bucket.makerspace,
+            target=locked,
+            meta={"price": str(locked.price), "payment_status": locked.payment_status},
+        )
+        return locked
 
 
 def reprint(failed_request, actor):
     with transaction.atomic():
-        locked = (
-            PrintRequest.objects.select_for_update()
-            .select_related("bucket__makerspace")
-            .get(pk=failed_request.pk)
-        )
+        locked = _locked_request(failed_request.pk, "bucket__makerspace")
         if locked.status != PrintRequest.Status.FAILED:
             raise InvalidTransition("Only failed print requests can be reprinted.")
-        # Anchor every reprint to the file-owning original root, not the immediate
-        # failed attempt. Reprint clones never own PrintRequestFile rows, so pointing a
-        # reprint-of-a-reprint at its parent (which also has no files) would lose the
-        # model files. The root original holds the files, so the serializer's one-hop
-        # file fallback stays correct no matter how many retries occur.
+        # Reprint clones own no files, so anchor retries to the file-owning root.
         root = locked.reprint_of if locked.reprint_of_id else locked
         clone = PrintRequest.objects.create(
             bucket=locked.bucket,
@@ -298,6 +277,7 @@ def reprint(failed_request, actor):
             requested_filament_spool=locked.requested_filament_spool,
             estimated_minutes=locked.estimated_minutes,
             estimated_filament_grams=locked.estimated_filament_grams,
+            price=locked.price,
             model_file=locked.model_file,
             estimate_screenshot=locked.estimate_screenshot,
             preview_screenshot=locked.preview_screenshot,
@@ -312,8 +292,7 @@ def reprint(failed_request, actor):
             makerspace=locked.bucket.makerspace,
             target=clone,
             meta={
-                "original_id": root.id,
-                "reprinted_from_id": locked.id,
+                "original_id": root.id, "reprinted_from_id": locked.id,
                 "reprint_id": clone.id,
             },
         )

@@ -6,6 +6,8 @@ from apps.printing.serializers_buckets import ErrorSerializer, PrintBucketSerial
 from apps.printing.serializers_printers import PrintPrinterSerializer
 from apps.printing.serializers_requests import (
     FailPrintSerializer,
+    ManagedPrintRequestSerializer,
+    PrintAcceptSerializer,
     PrintRequestCreateSerializer,
     PrintRequestSerializer,
     PrintStartSerializer,
@@ -22,11 +24,13 @@ __all__ = [
     "FailPrintSerializer",
     "FilamentSpoolSerializer",
     "FilamentSpoolSummarySerializer",
+    "ManagedPrintRequestSerializer",
     "Makerspace",
     "PrintBucket",
     "PrintBucketSerializer",
     "PrintPrinter",
     "PrintPrinterSerializer",
+    "PrintAcceptSerializer",
     "PrintRequest",
     "PrintRequestCreateSerializer",
     "PrintRequestSerializer",

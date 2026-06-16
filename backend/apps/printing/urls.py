@@ -23,6 +23,7 @@ from apps.printing.views import (
     ManagedPrinterListCreateView,
     PrintBucketListView,
     PrintRequestAcceptView,
+    PrintRequestCollectView,
     PrintRequestCompleteView,
     PrintRequestCreateListView,
     PrintRequestDetailView,
@@ -133,6 +134,11 @@ urlpatterns = [
         "manage/requests/<int:pk>/complete",
         PrintRequestCompleteView.as_view(),
         name="managed-request-complete",
+    ),
+    path(
+        "manage/requests/<int:pk>/collect",
+        PrintRequestCollectView.as_view(),
+        name="managed-request-collect",
     ),
     path(
         "manage/requests/<int:pk>/fail",

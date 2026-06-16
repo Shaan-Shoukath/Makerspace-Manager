@@ -137,6 +137,7 @@ def test_makerspace_printing_report_aggregates_totals_hours_filament_and_periods
     assert response.data["totals"] == {
         "total_requests": 8,
         "completed": 3,
+        "collected": 0,
         "failed": 1,
         "rejected": 1,
         "pending": 1,

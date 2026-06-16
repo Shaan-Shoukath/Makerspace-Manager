@@ -9,12 +9,14 @@ from apps.printing.models import FilamentSpool, PrintRequest
 
 STATUS_KEYS = {
     PrintRequest.Status.COMPLETED: "completed",
+    PrintRequest.Status.COLLECTED: "collected",
     PrintRequest.Status.FAILED: "failed",
     PrintRequest.Status.REJECTED: "rejected",
     PrintRequest.Status.PENDING: "pending",
     PrintRequest.Status.PRINTING: "printing",
     PrintRequest.Status.ACCEPTED: "accepted",
 }
+COMPLETED_STATUSES = [PrintRequest.Status.COMPLETED, PrintRequest.Status.COLLECTED]
 
 
 def build_printing_report(makerspace_id=None, *, include_makerspace=False):
@@ -37,6 +39,7 @@ def build_printing_report(makerspace_id=None, *, include_makerspace=False):
         "filament_by_brand": _filament_by_brand(spools),
         "top_requesters": _top_requesters(requests, include_makerspace),
         "total_grams_used": _total_spool_grams_used(spools),
+        "payments": _payments(requests),
         "filament_estimated_by_period": {
             "by_month": _estimated_filament_by_period(requests, TruncMonth, "%Y-%m"),
             "by_day": _estimated_filament_by_period(requests, TruncDay, "%Y-%m-%d"),
@@ -60,7 +63,7 @@ def _totals(requests):
 
 def _printer_hours(requests, include_makerspace):
     completed = requests.filter(
-        status=PrintRequest.Status.COMPLETED,
+        status__in=COMPLETED_STATUSES,
         printer__isnull=False,
     )
     values = ["printer_id", "printer__name"]
@@ -96,7 +99,7 @@ def _printer_outcomes(requests, include_makerspace):
 
     qs = requests.filter(
         printer__isnull=False,
-        status__in=[PrintRequest.Status.COMPLETED, PrintRequest.Status.FAILED],
+        status__in=COMPLETED_STATUSES + [PrintRequest.Status.FAILED],
     )
     values = ["printer_id", "printer__name"]
     if include_makerspace:
@@ -104,7 +107,7 @@ def _printer_outcomes(requests, include_makerspace):
     rows = (
         qs.values(*values)
         .annotate(
-            completed=Count("id", filter=Q(status=PrintRequest.Status.COMPLETED)),
+            completed=Count("id", filter=Q(status__in=COMPLETED_STATUSES)),
             failed=Count("id", filter=Q(status=PrintRequest.Status.FAILED)),
             grams_used=Coalesce(Sum("filament_grams_used"), Decimal("0")),
         )
@@ -205,7 +208,7 @@ def _spool_grams_used(spool):
 def _estimated_filament_by_period(requests, trunc, period_format):
     rows = (
         requests.filter(
-            status=PrintRequest.Status.COMPLETED,
+            status__in=COMPLETED_STATUSES,
             completed_at__isnull=False,
             estimated_filament_grams__isnull=False,
         )
@@ -221,6 +224,28 @@ def _estimated_filament_by_period(requests, trunc, period_format):
         }
         for row in rows
     ]
+
+
+def _payments(requests):
+    paid = _payment_summary(requests, PrintRequest.PaymentStatus.PAID)
+    outstanding = _payment_summary(requests, PrintRequest.PaymentStatus.PENDING)
+    return {
+        "paid_amount": paid["amount"],
+        "paid_count": paid["count"],
+        "outstanding_amount": outstanding["amount"],
+        "outstanding_count": outstanding["count"],
+    }
+
+
+def _payment_summary(requests, payment_status):
+    row = requests.filter(payment_status=payment_status).aggregate(
+        amount=Sum("price"),
+        count=Count("id"),
+    )
+    return {
+        "amount": row["amount"] or Decimal("0.00"),
+        "count": row["count"] or 0,
+    }
 
 
 def _decimal_to_float(value):

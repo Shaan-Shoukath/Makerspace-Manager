@@ -118,6 +118,30 @@ class PrintRequestSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class ManagedPrintRequestSerializer(PrintRequestSerializer):
+    collected_by = serializers.IntegerField(source="collected_by_id", read_only=True)
+
+    class Meta(PrintRequestSerializer.Meta):
+        fields = PrintRequestSerializer.Meta.fields + (
+            "price",
+            "payment_status",
+            "paid_at",
+            "collected_at",
+            "collected_by",
+        )
+        read_only_fields = fields
+
+
+class PrintAcceptSerializer(serializers.Serializer):
+    price = serializers.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        min_value=0,
+        required=False,
+        default=0,
+    )
+
+
 class RejectFailSerializer(serializers.Serializer):
     reason = serializers.CharField(allow_blank=False, trim_whitespace=True)
 

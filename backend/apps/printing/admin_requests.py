@@ -104,7 +104,7 @@ class PrintRequestAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
         success_count = 0
         for print_request in queryset:
             try:
-                workflow.accept(print_request, request.user)
+                workflow.accept(print_request, request.user, price=0)
             except workflow.InvalidTransition as exc:
                 self.message_user(request, f"{print_request.pk}: {exc}", level=messages.ERROR)
             else:

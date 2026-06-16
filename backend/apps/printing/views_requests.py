@@ -10,6 +10,7 @@ from apps.makerspaces.guards import require_module
 from apps.printing.models import PrintRequest, PrintRequestFile
 from apps.printing.permissions import CanManagePrinting, IsActiveRequester
 from apps.printing.serializers import (
+    ManagedPrintRequestSerializer,
     PrintRequestCreateSerializer,
     PrintRequestSerializer,
 )
@@ -108,7 +109,7 @@ class ManagedPrintRequestListView(
     ManagedPrintRequestQuerysetMixin, generics.ListAPIView
 ):
     permission_classes = [CanManagePrinting]
-    serializer_class = PrintRequestSerializer
+    serializer_class = ManagedPrintRequestSerializer
 
     @extend_schema(
         parameters=[
@@ -116,7 +117,7 @@ class ManagedPrintRequestListView(
             OpenApiParameter("status", str, OpenApiParameter.QUERY),
             OpenApiParameter("bucket", int, OpenApiParameter.QUERY),
         ],
-        responses={200: PrintRequestSerializer(many=True), **ERROR_RESPONSES},
+        responses={200: ManagedPrintRequestSerializer(many=True), **ERROR_RESPONSES},
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
@@ -127,9 +128,9 @@ class ManagedPrintRequestDetailView(
     ManagedPrintRequestQuerysetMixin, generics.RetrieveAPIView
 ):
     permission_classes = [CanManagePrinting]
-    serializer_class = PrintRequestSerializer
+    serializer_class = ManagedPrintRequestSerializer
 
-    @extend_schema(responses={200: PrintRequestSerializer, **ERROR_RESPONSES})
+    @extend_schema(responses={200: ManagedPrintRequestSerializer, **ERROR_RESPONSES})
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
@@ -169,7 +170,7 @@ class ManagedPrintFileUrlView(APIView):
 @extend_schema(tags=["Printing"], summary="List completed print requests")
 class PrintedListView(ManagedPrintRequestQuerysetMixin, generics.ListAPIView):
     permission_classes = [CanManagePrinting]
-    serializer_class = PrintRequestSerializer
+    serializer_class = ManagedPrintRequestSerializer
 
     def get_queryset(self):
         return super().get_queryset().filter(status=PrintRequest.Status.COMPLETED)
@@ -179,7 +180,7 @@ class PrintedListView(ManagedPrintRequestQuerysetMixin, generics.ListAPIView):
             OpenApiParameter("makerspace", int, OpenApiParameter.QUERY),
             OpenApiParameter("bucket", int, OpenApiParameter.QUERY),
         ],
-        responses={200: PrintRequestSerializer(many=True), **ERROR_RESPONSES},
+        responses={200: ManagedPrintRequestSerializer(many=True), **ERROR_RESPONSES},
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)

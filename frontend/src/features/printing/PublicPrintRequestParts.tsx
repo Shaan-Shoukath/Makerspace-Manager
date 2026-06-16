@@ -18,6 +18,7 @@ const steps = [
   { key: "accepted", label: "Accepted" },
   { key: "printing", label: "Printing" },
   { key: "completed", label: "Ready to collect" },
+  { key: "collected", label: "Collected" },
 ];
 
 export function TextInput({

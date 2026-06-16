@@ -6446,7 +6446,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/PaginatedPrintRequestList"
+                                    "$ref": "#/components/schemas/PaginatedManagedPrintRequestList"
                                 }
                             }
                         },
@@ -6879,7 +6879,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/PaginatedPrintRequestList"
+                                    "$ref": "#/components/schemas/PaginatedManagedPrintRequestList"
                                 }
                             }
                         },
@@ -6934,7 +6934,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/PrintRequest"
+                                    "$ref": "#/components/schemas/ManagedPrintRequest"
                                 }
                             }
                         },
@@ -6979,6 +6979,25 @@
                 "tags": [
                     "Printing"
                 ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PrintAccept"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PrintAccept"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PrintAccept"
+                            }
+                        }
+                    }
+                },
                 "security": [
                     {
                         "jwtAuth": []
@@ -6989,7 +7008,72 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/PrintRequest"
+                                    "$ref": "#/components/schemas/ManagedPrintRequest"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        },
+                        "description": "Invalid request."
+                    },
+                    "401": {
+                        "description": "Authentication credentials were not provided."
+                    },
+                    "403": {
+                        "description": "Permission denied."
+                    },
+                    "404": {
+                        "description": "Not found."
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        },
+                        "description": "Invalid status transition."
+                    }
+                }
+            }
+        },
+        "/api/v1/printing/manage/requests/{id}/collect": {
+            "post": {
+                "operationId": "api_v1_printing_manage_requests_collect_create",
+                "summary": "Collect print request",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "Printing"
+                ],
+                "security": [
+                    {
+                        "jwtAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ManagedPrintRequest"
                                 }
                             }
                         },
@@ -7054,7 +7138,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/PrintRequest"
+                                    "$ref": "#/components/schemas/ManagedPrintRequest"
                                 }
                             }
                         },
@@ -7139,7 +7223,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/PrintRequest"
+                                    "$ref": "#/components/schemas/ManagedPrintRequest"
                                 }
                             }
                         },
@@ -7224,7 +7308,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/PrintRequest"
+                                    "$ref": "#/components/schemas/ManagedPrintRequest"
                                 }
                             }
                         },
@@ -7289,7 +7373,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/PrintRequest"
+                                    "$ref": "#/components/schemas/ManagedPrintRequest"
                                 }
                             }
                         },
@@ -7373,7 +7457,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/PrintRequest"
+                                    "$ref": "#/components/schemas/ManagedPrintRequest"
                                 }
                             }
                         },
@@ -11119,6 +11203,266 @@
                     "updated_at"
                 ]
             },
+            "ManagedPrintRequest": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "bucket": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PrintBucket"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "makerspace": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "requester": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "requester_email": {
+                        "type": "string",
+                        "format": "email",
+                        "readOnly": true
+                    },
+                    "requester_username": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "requester_name": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "title": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "description": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "material": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "color": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "quantity": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "source_link": {
+                        "type": "string",
+                        "format": "uri",
+                        "readOnly": true
+                    },
+                    "model_file": {
+                        "type": "string",
+                        "format": "uri",
+                        "readOnly": true
+                    },
+                    "preferred_settings": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "estimate_screenshot": {
+                        "type": "string",
+                        "format": "uri",
+                        "readOnly": true
+                    },
+                    "preview_screenshot": {
+                        "type": "string",
+                        "format": "uri",
+                        "readOnly": true
+                    },
+                    "project_brief": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "contact_email": {
+                        "type": "string",
+                        "format": "email",
+                        "readOnly": true
+                    },
+                    "contact_phone": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "files": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "status": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/Status073Enum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "reason": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "handled_by": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "printer": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PrintPrinter"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "filament_spool": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/FilamentSpoolSummary"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "requested_filament_spool": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/FilamentSpoolSummary"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "estimated_minutes": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "estimated_filament_grams": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,6}(?:\\.\\d{0,2})?$",
+                        "readOnly": true
+                    },
+                    "filament_grams_used": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,6}(?:\\.\\d{0,2})?$",
+                        "readOnly": true
+                    },
+                    "reprint_of": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "accepted_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "started_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "completed_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "price": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,6}(?:\\.\\d{0,2})?$",
+                        "readOnly": true
+                    },
+                    "payment_status": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PaymentStatusEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "paid_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "collected_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "collected_by": {
+                        "type": "integer",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "accepted_at",
+                    "bucket",
+                    "collected_at",
+                    "collected_by",
+                    "color",
+                    "completed_at",
+                    "contact_email",
+                    "contact_phone",
+                    "created_at",
+                    "description",
+                    "estimate_screenshot",
+                    "estimated_filament_grams",
+                    "estimated_minutes",
+                    "filament_grams_used",
+                    "filament_spool",
+                    "files",
+                    "handled_by",
+                    "id",
+                    "makerspace",
+                    "material",
+                    "model_file",
+                    "paid_at",
+                    "payment_status",
+                    "preferred_settings",
+                    "preview_screenshot",
+                    "price",
+                    "printer",
+                    "project_brief",
+                    "quantity",
+                    "reason",
+                    "reprint_of",
+                    "requested_filament_spool",
+                    "requester",
+                    "requester_email",
+                    "requester_name",
+                    "requester_username",
+                    "source_link",
+                    "started_at",
+                    "status",
+                    "title",
+                    "updated_at"
+                ]
+            },
             "NeedsFixAction": {
                 "type": "object",
                 "properties": {
@@ -11410,6 +11754,37 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/InventoryProductAdmin"
+                        }
+                    }
+                }
+            },
+            "PaginatedManagedPrintRequestList": {
+                "type": "object",
+                "required": [
+                    "count",
+                    "results"
+                ],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ManagedPrintRequest"
                         }
                     }
                 }
@@ -12374,6 +12749,15 @@
                     }
                 }
             },
+            "PaymentStatusEnum": {
+                "enum": [
+                    "none",
+                    "pending",
+                    "paid"
+                ],
+                "type": "string",
+                "description": "* `none` - None\n* `pending` - Pending\n* `paid` - Paid"
+            },
             "PlatformEmailSettings": {
                 "type": "object",
                 "properties": {
@@ -12424,6 +12808,17 @@
                     "smtp_password_set",
                     "updated_at"
                 ]
+            },
+            "PrintAccept": {
+                "type": "object",
+                "properties": {
+                    "price": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,6}(?:\\.\\d{0,2})?$",
+                        "default": "0.00"
+                    }
+                }
             },
             "PrintBucket": {
                 "type": "object",
@@ -12724,7 +13119,7 @@
                     "status": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/PrintRequestStatusEnum"
+                                "$ref": "#/components/schemas/Status073Enum"
                             }
                         ],
                         "readOnly": true
@@ -12904,18 +13299,6 @@
                     "title"
                 ]
             },
-            "PrintRequestStatusEnum": {
-                "enum": [
-                    "pending",
-                    "accepted",
-                    "printing",
-                    "completed",
-                    "rejected",
-                    "failed"
-                ],
-                "type": "string",
-                "description": "* `pending` - Pending\n* `accepted` - Accepted\n* `printing` - Printing\n* `completed` - Completed\n* `rejected` - Rejected\n* `failed` - Failed"
-            },
             "PrintRequestSubmit": {
                 "type": "object",
                 "properties": {
@@ -13065,6 +13448,9 @@
                         "type": "number",
                         "format": "double"
                     },
+                    "payments": {
+                        "$ref": "#/components/schemas/PrintingReportPayments"
+                    },
                     "filament_estimated_by_period": {
                         "$ref": "#/components/schemas/PrintingReportPeriods"
                     }
@@ -13073,6 +13459,7 @@
                     "filament_by_brand",
                     "filament_estimated_by_period",
                     "filament_used",
+                    "payments",
                     "printer_hours",
                     "printer_outcomes",
                     "top_requesters",
@@ -13130,6 +13517,33 @@
                     "material",
                     "remaining_grams",
                     "spool_id"
+                ]
+            },
+            "PrintingReportPayments": {
+                "type": "object",
+                "properties": {
+                    "paid_amount": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                    },
+                    "paid_count": {
+                        "type": "integer"
+                    },
+                    "outstanding_amount": {
+                        "type": "string",
+                        "format": "decimal",
+                        "pattern": "^-?\\d{0,10}(?:\\.\\d{0,2})?$"
+                    },
+                    "outstanding_count": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "outstanding_amount",
+                    "outstanding_count",
+                    "paid_amount",
+                    "paid_count"
                 ]
             },
             "PrintingReportPeriod": {
@@ -13269,6 +13683,9 @@
                     "completed": {
                         "type": "integer"
                     },
+                    "collected": {
+                        "type": "integer"
+                    },
                     "failed": {
                         "type": "integer"
                     },
@@ -13287,6 +13704,7 @@
                 },
                 "required": [
                     "accepted",
+                    "collected",
                     "completed",
                     "failed",
                     "pending",
@@ -14366,6 +14784,19 @@
                 ],
                 "type": "string",
                 "description": "* `space_manager` - Space Manager\n* `guest_admin` - Guest Admin\n* `inventory_manager` - Inventory Manager\n* `print_manager` - Print Manager"
+            },
+            "Status073Enum": {
+                "enum": [
+                    "pending",
+                    "accepted",
+                    "printing",
+                    "completed",
+                    "collected",
+                    "rejected",
+                    "failed"
+                ],
+                "type": "string",
+                "description": "* `pending` - Pending\n* `accepted` - Accepted\n* `printing` - Printing\n* `completed` - Completed\n* `collected` - Collected\n* `rejected` - Rejected\n* `failed` - Failed"
             },
             "Status438Enum": {
                 "enum": [

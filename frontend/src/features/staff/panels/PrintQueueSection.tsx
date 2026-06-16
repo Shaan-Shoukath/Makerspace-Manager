@@ -10,12 +10,12 @@ import {
   type PrintRequest,
   printingRequest,
 } from "./PrintingPanelParts";
-import { FailPrintDialog } from "./PrintingPanelDialogs";
+import { AcceptPrintDialog, FailPrintDialog } from "./PrintingPanelDialogs";
 
 // The print queue lives here so it can be shown inside the unified "Requests" tab
 // alongside hardware requests. It now covers the FULL lifecycle to match hardware:
-// pending (accept/reject) -> accepted (start) -> printing (complete/fail), plus a
-// read-only history (rejected/completed/failed). Printer & spool management stays in
+// pending (accept/reject) -> accepted (start) -> printing (complete/fail) ->
+// completed (collect), plus a read-only history (collected/rejected/failed). Printer & spool management stays in
 // PrintingPanel; both query the same TanStack keys so the cache is shared.
 export function PrintQueueSection({ makerspace }: { makerspace: Makerspace }) {
   const queryClient = useQueryClient();
@@ -32,11 +32,12 @@ export function PrintQueueSection({ makerspace }: { makerspace: Makerspace }) {
   const pending = useStaffGet<{ results: PrintRequest[] }>(["print-requests", makerspace.id, "pending"], reqUrl("pending"));
   const accepted = useStaffGet<{ results: PrintRequest[] }>(["print-requests", makerspace.id, "accepted"], reqUrl("accepted"));
   const printing = useStaffGet<{ results: PrintRequest[] }>(["print-requests", makerspace.id, "printing"], reqUrl("printing"));
+  const completed = useStaffGet<{ results: PrintRequest[] }>(["print-requests", makerspace.id, "completed"], reqUrl("completed"));
 
   const [showHistory, setShowHistory] = useState(false);
-  // History queries only fire when expanded (completed lists can be large) — useStaffGet's
+  // History queries only fire when expanded (terminal lists can be large) — useStaffGet's
   // third arg is the TanStack `enabled` flag, so the network call is deferred until needed.
-  const completed = useStaffGet<{ results: PrintRequest[] }>(["print-requests", makerspace.id, "completed"], reqUrl("completed"), showHistory);
+  const collected = useStaffGet<{ results: PrintRequest[] }>(["print-requests", makerspace.id, "collected"], reqUrl("collected"), showHistory);
   const rejected = useStaffGet<{ results: PrintRequest[] }>(["print-requests", makerspace.id, "rejected"], reqUrl("rejected"), showHistory);
   const failed = useStaffGet<{ results: PrintRequest[] }>(["print-requests", makerspace.id, "failed"], reqUrl("failed"), showHistory);
 
@@ -44,11 +45,12 @@ export function PrintQueueSection({ makerspace }: { makerspace: Makerspace }) {
   const [selectedSpool, setSelectedSpool] = useState("");
   const [estimatedMinutes, setEstimatedMinutes] = useState("60");
   const [estimatedGrams, setEstimatedGrams] = useState("100");
+  const [acceptingRequest, setAcceptingRequest] = useState<PrintRequest | null>(null);
   const [failingRequest, setFailingRequest] = useState<PrintRequest | null>(null);
   const [rejectingRequest, setRejectingRequest] = useState<PrintRequest | null>(null);
 
   const action = useMutation({
-    mutationFn: ({ request, name, reason, percentComplete }: { request: PrintRequest; name: "start" | "complete" | "fail" | "accept" | "reject" | "reprint"; reason?: string; percentComplete?: number }) => {
+    mutationFn: ({ request, name, reason, percentComplete, price }: { request: PrintRequest; name: "start" | "complete" | "fail" | "accept" | "reject" | "reprint" | "collect"; reason?: string; percentComplete?: number; price?: string }) => {
       const body =
         name === "start"
           ? {
@@ -61,13 +63,16 @@ export function PrintQueueSection({ makerspace }: { makerspace: Makerspace }) {
             ? { reason, percent_complete: percentComplete ?? 0 }
             : name === "reject"
               ? { reason }
-              : {};
+              : name === "accept"
+                ? { price: price ?? "0" }
+                : {};
       return printingRequest(`/printing/manage/requests/${request.id}/${name}`, {
         method: "POST",
         body: JSON.stringify(body),
       });
     },
     onSuccess: () => {
+      setAcceptingRequest(null);
       setFailingRequest(null);
       setRejectingRequest(null);
       queryClient.invalidateQueries({ queryKey: ["print-printers", makerspace.id] });
@@ -78,7 +83,7 @@ export function PrintQueueSection({ makerspace }: { makerspace: Makerspace }) {
 
   const printerRows = printers.data?.results ?? [];
   const spoolRows = spools.data?.results ?? [];
-  const anyQueueLoading = pending.isLoading || accepted.isLoading || printing.isLoading;
+  const anyQueueLoading = pending.isLoading || accepted.isLoading || printing.isLoading || completed.isLoading;
   const actionError = action.error instanceof Error ? action.error.message : undefined;
   // Backend _assign_print_job blocks start unless the printer is is_active AND status active,
   // so only offer those as start targets (otherwise the user hits a 409 after clicking Start).
@@ -91,7 +96,7 @@ export function PrintQueueSection({ makerspace }: { makerspace: Makerspace }) {
       <div className="mb-3">
         <PrintRows title="Pending review" rows={pending.data?.results ?? []} action={(row) => (
           <>
-            <button disabled={action.isPending} onClick={() => action.mutate({ request: row, name: "accept" })}>Accept</button>
+            <button disabled={action.isPending} onClick={() => setAcceptingRequest(row)}>Accept</button>
             <button disabled={action.isPending} onClick={() => setRejectingRequest(row)}>Reject</button>
           </>
         )} />
@@ -142,13 +147,21 @@ export function PrintQueueSection({ makerspace }: { makerspace: Makerspace }) {
         )} />
       </div>
 
+      <div className="mt-3">
+        <PrintRows title="Ready for collection" rows={completed.data?.results ?? []} action={(row) => (
+          <button disabled={action.isPending} onClick={() => action.mutate({ request: row, name: "collect" })}>
+            {action.isPending ? "..." : "Mark collected"}
+          </button>
+        )} />
+      </div>
+
       <div className="mt-4">
         <button type="button" className="text-sm text-accent" onClick={() => setShowHistory((value) => !value)}>
-          {showHistory ? "Hide history" : "Show history (completed / rejected / failed)"}
+          {showHistory ? "Hide history" : "Show history (collected / rejected / failed)"}
         </button>
         {showHistory ? (
           <div className="mt-3 grid gap-3 lg:grid-cols-3">
-            <PrintRows title="Completed" rows={completed.data?.results ?? []} action={() => null} />
+            <PrintRows title="Collected" rows={collected.data?.results ?? []} action={() => null} />
             <PrintRows title="Rejected" rows={rejected.data?.results ?? []} action={() => null} />
             <PrintRows title="Failed" rows={failed.data?.results ?? []} action={(row) => (
               <button disabled={action.isPending} onClick={() => action.mutate({ request: row, name: "reprint" })}>
@@ -162,8 +175,19 @@ export function PrintQueueSection({ makerspace }: { makerspace: Makerspace }) {
       <ErrorText message={pending.error instanceof Error ? pending.error.message : undefined} />
       <ErrorText message={accepted.error instanceof Error ? accepted.error.message : undefined} />
       <ErrorText message={printing.error instanceof Error ? printing.error.message : undefined} />
-      <ErrorText message={!failingRequest && !rejectingRequest ? actionError : undefined} />
+      <ErrorText message={completed.error instanceof Error ? completed.error.message : undefined} />
+      <ErrorText message={collected.error instanceof Error ? collected.error.message : undefined} />
+      <ErrorText message={rejected.error instanceof Error ? rejected.error.message : undefined} />
+      <ErrorText message={failed.error instanceof Error ? failed.error.message : undefined} />
+      <ErrorText message={!acceptingRequest && !failingRequest && !rejectingRequest ? actionError : undefined} />
 
+      <AcceptPrintDialog
+        open={Boolean(acceptingRequest)}
+        pending={action.isPending}
+        error={acceptingRequest ? actionError : undefined}
+        onClose={() => setAcceptingRequest(null)}
+        onSubmit={(price) => acceptingRequest && action.mutate({ request: acceptingRequest, name: "accept", price })}
+      />
       <FailPrintDialog
         open={Boolean(failingRequest)}
         pending={action.isPending}
