@@ -23,6 +23,7 @@ def _request_item_rows(makerspace_id):
         HardwareRequestItem.objects.select_related(
             "product",
             "request",
+            "request__requester",
             "request__public_tool_loan",
             "request__public_tool_loan__requester",
         )
@@ -59,7 +60,7 @@ def _request_item_rows(makerspace_id):
             {
                 "source": _source(loan),
                 "item_name": item.product.name,
-                "holder": loan.requester.username if loan else _request_holder(item.request),
+                "holder": _request_holder(item.request),
                 "quantity": item.outstanding,
                 "since": item.request.issued_at,
                 "due": (loan.due_at if loan else None) or item.request.return_due_at,
@@ -87,8 +88,44 @@ def _source(loan):
 
 
 def _request_holder(request):
-    return (
-        request.requester_username
-        or request.requester_contact_email
-        or request.requester_contact_phone
-    )
+    requester = getattr(request, "requester", None)
+    email_candidates = [
+        request.requester_contact_email,
+        getattr(requester, "email", ""),
+        request.requester_username,
+        getattr(requester, "external_checkin_user_id", ""),
+    ]
+    for value in email_candidates:
+        label = _clean_label(value)
+        if _looks_like_email(label) and not _is_internal_checkin_username(label):
+            return label
+
+    candidates = [
+        request.requester_contact_phone,
+        request.requester_username,
+        getattr(requester, "external_checkin_user_id", ""),
+        getattr(requester, "username", ""),
+    ]
+    for value in candidates:
+        label = _clean_label(value)
+        if label and not _is_internal_checkin_username(label):
+            return label
+
+    for value in candidates:
+        label = _clean_label(value)
+        if label:
+            return label
+    return ""
+
+
+def _clean_label(value):
+    return str(value or "").strip()
+
+
+def _looks_like_email(value):
+    return "@" in value
+
+
+def _is_internal_checkin_username(value):
+    local_part = value.split("@", 1)[0]
+    return local_part.startswith("checkin_") and len(local_part) > 32

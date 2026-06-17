@@ -204,6 +204,90 @@ def test_ledger_reports_every_item_of_a_bundled_loan():
     assert all(row["source"] == "self_checkout" for row in response.data["results"])
 
 
+def test_ledger_holder_prefers_contact_email_over_checkin_username():
+    makerspace = make_space("ledger-holder-email")
+    manager = make_member("ledger-holder-email-manager", makerspace)
+    product = make_product(makerspace, name="Soldering Iron")
+    requester = make_user(
+        "checkin_" + "a" * 64,
+        access_status=User.AccessStatus.ACTIVE,
+    )
+    issued_at = timezone.now() - timedelta(hours=2)
+    request = HardwareRequest.objects.create(
+        makerspace=makerspace,
+        requester=requester,
+        requester_username=requester.username,
+        requester_contact_email="holder@example.com",
+        status=HardwareRequest.Status.ISSUED,
+        issued_at=issued_at,
+    )
+    HardwareRequestItem.objects.create(
+        request=request,
+        product=product,
+        requested_quantity=1,
+        accepted_quantity=1,
+        issued_quantity=1,
+    )
+    PublicToolLoan.objects.create(
+        makerspace=makerspace,
+        request=request,
+        requester=requester,
+        target_type="product",
+        target_id=product.id,
+        target_label=product.name,
+        status=PublicToolLoan.Status.CHECKED_OUT,
+    )
+
+    response = authenticated_client(manager).get(
+        f"/api/v1/admin/makerspace/{makerspace.id}/ledger"
+    )
+
+    assert response.status_code == 200
+    assert response.data["results"][0]["holder"] == "holder@example.com"
+
+
+def test_ledger_holder_uses_checkin_external_email_before_internal_username():
+    makerspace = make_space("ledger-holder-external-email")
+    manager = make_member("ledger-holder-external-email-manager", makerspace)
+    product = make_product(makerspace, name="Crimp Tool")
+    requester = make_user(
+        "checkin_" + "b" * 64,
+        access_status=User.AccessStatus.ACTIVE,
+        external_checkin_user_id="external-holder@example.com",
+    )
+    issued_at = timezone.now() - timedelta(hours=1)
+    request = HardwareRequest.objects.create(
+        makerspace=makerspace,
+        requester=requester,
+        requester_username="External Holder",
+        status=HardwareRequest.Status.ISSUED,
+        issued_at=issued_at,
+    )
+    HardwareRequestItem.objects.create(
+        request=request,
+        product=product,
+        requested_quantity=1,
+        accepted_quantity=1,
+        issued_quantity=1,
+    )
+    PublicToolLoan.objects.create(
+        makerspace=makerspace,
+        request=request,
+        requester=requester,
+        target_type="product",
+        target_id=product.id,
+        target_label=product.name,
+        status=PublicToolLoan.Status.CHECKED_OUT,
+    )
+
+    response = authenticated_client(manager).get(
+        f"/api/v1/admin/makerspace/{makerspace.id}/ledger"
+    )
+
+    assert response.status_code == 200
+    assert response.data["results"][0]["holder"] == "external-holder@example.com"
+
+
 def test_active_loans_xlsx_export_handles_timezone_aware_datetimes():
     """active-loans rows carry tz-aware issued_at; openpyxl rejects tz-aware
     datetimes, so the XLSX export must normalize them instead of 500ing."""
