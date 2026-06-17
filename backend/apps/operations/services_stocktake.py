@@ -4,7 +4,12 @@ from rest_framework.exceptions import ValidationError
 
 from apps.audit import services as audit
 from apps.inventory.models import InventoryAsset, InventoryProduct
-from apps.operations.models import InventoryAdjustment, StocktakeLine, StocktakeSession
+from apps.operations.models import (
+    InventoryAdjustment,
+    StocktakeLedgerEntry,
+    StocktakeLine,
+    StocktakeSession,
+)
 from apps.operations.services_shared import _container
 
 
@@ -28,12 +33,13 @@ def add_stocktake_line(actor, stocktake, data):
         product = None
         asset = None
         expected = 0
+        condition = data.get("condition") or StocktakeLine.Condition.AVAILABLE
         if data.get("asset_id"):
             asset = InventoryAsset.objects.get(pk=data["asset_id"], makerspace=locked.makerspace)
-            expected = 1 if asset.status == InventoryAsset.Status.AVAILABLE else 0
+            expected = 1 if _asset_bucket(asset.status) == condition else 0
         else:
             product = InventoryProduct.objects.get(pk=data["product_id"], makerspace=locked.makerspace)
-            expected = product.available_quantity
+            expected = _product_expected(product, condition)
         container = _container(data.get("container_id"), locked.makerspace_id)
         counted = data["counted_quantity"]
         line = StocktakeLine.objects.create(
@@ -44,7 +50,7 @@ def add_stocktake_line(actor, stocktake, data):
             expected_quantity=expected,
             counted_quantity=counted,
             variance_quantity=counted - expected,
-            condition=data.get("condition") or StocktakeLine.Condition.AVAILABLE,
+            condition=condition,
             notes=data.get("notes", ""),
         )
         audit.record(actor, "stocktake.line_counted", makerspace=locked.makerspace, target=locked, meta={"line_id": line.id})
@@ -77,45 +83,117 @@ def approve_stocktake(actor, stocktake):
 
 
 def apply_stocktake_adjustments(actor, stocktake):
-    if stocktake.status != StocktakeSession.Status.APPROVED:
-        raise ValidationError("Only approved stocktakes can be applied.")
     with transaction.atomic():
         locked = StocktakeSession.objects.select_for_update().get(pk=stocktake.pk)
+        if locked.status != StocktakeSession.Status.APPROVED:
+            raise ValidationError("Only approved stocktakes can be applied.")
         for line in locked.lines.select_related("product", "asset"):
-            if line.variance_quantity == 0:
-                continue
-            if line.asset_id:
-                _apply_asset_line(line)
-            else:
-                _apply_product_line(line)
-            InventoryAdjustment.objects.create(
-                makerspace=locked.makerspace,
-                stocktake=locked,
-                product=line.product,
-                asset=line.asset,
-                delta_available=line.variance_quantity if line.condition == StocktakeLine.Condition.AVAILABLE else 0,
-                delta_damaged=line.variance_quantity if line.condition == StocktakeLine.Condition.DAMAGED else 0,
-                delta_lost=line.variance_quantity if line.condition == StocktakeLine.Condition.LOST else 0,
-                reason=f"Stocktake #{locked.id}: {line.notes}".strip(),
-                created_by=actor,
-            )
+            entries = _ledger_entries_for_line(actor, locked, line)
+            _apply_ledger_entries(entries)
+            _record_adjustment(actor, locked, line, entries)
         locked.status = StocktakeSession.Status.APPLIED
         locked.save(update_fields=["status"])
         audit.record(actor, "stocktake.adjustments_applied", makerspace=locked.makerspace, target=locked)
         return locked
 
 
-def _apply_product_line(line):
-    product = InventoryProduct.objects.select_for_update().get(pk=line.product_id)
-    if line.condition == StocktakeLine.Condition.AVAILABLE:
-        new_available = product.available_quantity + line.variance_quantity
-        if new_available < 0:
-            raise ValidationError("Stocktake adjustment would make available stock negative.")
-        product.available_quantity = new_available
-    elif line.condition == StocktakeLine.Condition.DAMAGED:
-        product.damaged_quantity = max(0, product.damaged_quantity + line.variance_quantity)
-    elif line.condition == StocktakeLine.Condition.LOST:
-        product.lost_quantity = max(0, product.lost_quantity + line.variance_quantity)
+def _product_expected(product, condition):
+    if condition == StocktakeLine.Condition.AVAILABLE:
+        return product.available_quantity
+    if condition == StocktakeLine.Condition.DAMAGED:
+        return product.damaged_quantity
+    if condition == StocktakeLine.Condition.LOST:
+        return product.lost_quantity
+    return 0
+
+
+def _asset_bucket(status):
+    return {
+        InventoryAsset.Status.AVAILABLE: StocktakeLedgerEntry.Bucket.AVAILABLE,
+        InventoryAsset.Status.DAMAGED: StocktakeLedgerEntry.Bucket.DAMAGED,
+        InventoryAsset.Status.LOST: StocktakeLedgerEntry.Bucket.LOST,
+    }.get(status)
+
+
+def _asset_new_status(line):
+    if line.counted_quantity == 0:
+        return InventoryAsset.Status.LOST
+    if line.condition == StocktakeLine.Condition.DAMAGED:
+        return InventoryAsset.Status.DAMAGED
+    if line.condition == StocktakeLine.Condition.LOST:
+        return InventoryAsset.Status.LOST
+    return InventoryAsset.Status.AVAILABLE
+
+
+def _ledger_entries_for_line(actor, stocktake, line):
+    if line.condition == StocktakeLine.Condition.UNKNOWN:
+        raise ValidationError("Unknown stocktake condition cannot be applied.")
+    if line.asset_id:
+        return _asset_ledger_entries(actor, stocktake, line)
+    if line.variance_quantity == 0:
+        return []
+    return [
+        _create_ledger_entry(
+            actor,
+            stocktake,
+            line,
+            bucket=line.condition,
+            delta=line.variance_quantity,
+        )
+    ]
+
+
+def _asset_ledger_entries(actor, stocktake, line):
+    asset = InventoryAsset.objects.select_for_update().get(pk=line.asset_id)
+    old_status = asset.status
+    new_status = _asset_new_status(line)
+    entries = []
+    old_bucket = _asset_bucket(old_status)
+    new_bucket = _asset_bucket(new_status)
+    if old_bucket == new_bucket:
+        asset.status = new_status
+        asset.save(update_fields=["status", "updated_at"])
+        return entries
+    if old_bucket:
+        entries.append(_create_ledger_entry(actor, stocktake, line, bucket=old_bucket, delta=-1, old_status=old_status, new_status=new_status))
+    if new_bucket:
+        entries.append(_create_ledger_entry(actor, stocktake, line, bucket=new_bucket, delta=1, old_status=old_status, new_status=new_status))
+    asset.status = new_status
+    asset.save(update_fields=["status", "updated_at"])
+    return entries
+
+
+def _create_ledger_entry(actor, stocktake, line, *, bucket, delta, old_status="", new_status=""):
+    return StocktakeLedgerEntry.objects.create(
+        makerspace=stocktake.makerspace,
+        stocktake=stocktake,
+        line=line,
+        product=line.product or (line.asset.product if line.asset_id else None),
+        asset=line.asset,
+        bucket=bucket,
+        delta=delta,
+        old_asset_status=old_status,
+        new_asset_status=new_status,
+        reason=f"Stocktake #{stocktake.id}: {line.notes}".strip(),
+        created_by=actor,
+    )
+
+
+def _apply_ledger_entries(entries):
+    for entry in entries:
+        product = InventoryProduct.objects.select_for_update().get(pk=entry.product_id)
+        if entry.bucket == StocktakeLedgerEntry.Bucket.AVAILABLE:
+            product.available_quantity += entry.delta
+        elif entry.bucket == StocktakeLedgerEntry.Bucket.DAMAGED:
+            product.damaged_quantity += entry.delta
+        elif entry.bucket == StocktakeLedgerEntry.Bucket.LOST:
+            product.lost_quantity += entry.delta
+        if min(product.available_quantity, product.damaged_quantity, product.lost_quantity) < 0:
+            raise ValidationError("Stocktake adjustment would make inventory negative.")
+        _save_product_totals(product)
+
+
+def _save_product_totals(product):
     product.total_quantity = (
         product.available_quantity
         + product.reserved_quantity
@@ -127,12 +205,18 @@ def _apply_product_line(line):
     product.save()
 
 
-def _apply_asset_line(line):
-    asset = InventoryAsset.objects.select_for_update().get(pk=line.asset_id)
-    if line.counted_quantity == 0:
-        asset.status = InventoryAsset.Status.LOST
-    elif line.condition == StocktakeLine.Condition.DAMAGED:
-        asset.status = InventoryAsset.Status.DAMAGED
-    else:
-        asset.status = InventoryAsset.Status.AVAILABLE
-    asset.save(update_fields=["status", "updated_at"])
+def _record_adjustment(actor, stocktake, line, entries):
+    if not entries:
+        return
+    deltas = {entry.bucket: entry.delta for entry in entries}
+    InventoryAdjustment.objects.create(
+        makerspace=stocktake.makerspace,
+        stocktake=stocktake,
+        product=line.product or (line.asset.product if line.asset_id else None),
+        asset=line.asset,
+        delta_available=deltas.get(StocktakeLedgerEntry.Bucket.AVAILABLE, 0),
+        delta_damaged=deltas.get(StocktakeLedgerEntry.Bucket.DAMAGED, 0),
+        delta_lost=deltas.get(StocktakeLedgerEntry.Bucket.LOST, 0),
+        reason=f"Stocktake #{stocktake.id}: {line.notes}".strip(),
+        created_by=actor,
+    )

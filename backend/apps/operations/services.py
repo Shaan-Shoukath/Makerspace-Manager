@@ -22,8 +22,6 @@ from apps.operations.services_qr_assets import (
 )
 from apps.operations.services_shared import _container
 from apps.operations.services_stocktake import (
-    _apply_asset_line,
-    _apply_product_line,
     add_stocktake_line,
     apply_stocktake_adjustments,
     approve_stocktake,

@@ -94,6 +94,38 @@ class InventoryAdjustment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
+class StocktakeLedgerEntry(models.Model):
+    class Bucket(models.TextChoices):
+        AVAILABLE = "available", "Available"
+        DAMAGED = "damaged", "Damaged"
+        LOST = "lost", "Lost"
+
+    makerspace = models.ForeignKey(Makerspace, on_delete=models.CASCADE, related_name="stocktake_ledger_entries")
+    stocktake = models.ForeignKey(StocktakeSession, on_delete=models.CASCADE, related_name="ledger_entries")
+    line = models.ForeignKey(StocktakeLine, on_delete=models.CASCADE, related_name="ledger_entries")
+    product = models.ForeignKey(InventoryProduct, null=True, blank=True, on_delete=models.PROTECT, related_name="+")
+    asset = models.ForeignKey(InventoryAsset, null=True, blank=True, on_delete=models.PROTECT, related_name="+")
+    bucket = models.CharField(max_length=20, choices=Bucket.choices)
+    delta = models.IntegerField()
+    old_asset_status = models.CharField(max_length=20, blank=True)
+    new_asset_status = models.CharField(max_length=20, blank=True)
+    reason = models.TextField()
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["stocktake", "line", "bucket"],
+                name="uniq_stocktake_ledger_line_bucket",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["makerspace", "created_at"]),
+            models.Index(fields=["stocktake", "line"]),
+        ]
+
+
 class QrPrintBatch(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"

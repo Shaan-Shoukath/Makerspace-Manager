@@ -6,7 +6,13 @@ import pytest
 from apps.accounts.models import User
 from apps.boxes.models import Box, QrCode
 from apps.inventory.models import InventoryAsset, InventoryProduct, TrackingMode
-from apps.operations.models import InventoryAdjustment, QrPrintBatch, StockTransfer, StocktakeSession
+from apps.operations.models import (
+    InventoryAdjustment,
+    QrPrintBatch,
+    StockTransfer,
+    StocktakeLedgerEntry,
+    StocktakeSession,
+)
 from tests.return_helpers import authenticated_client, make_box, make_member, make_product, make_space, make_user
 
 pytestmark = pytest.mark.django_db
@@ -224,6 +230,90 @@ def test_stocktake_lifecycle_applies_superadmin_adjustment():
     product.refresh_from_db()
     assert product.available_quantity == 8
     assert StocktakeSession.objects.get(pk=stocktake_id).status == StocktakeSession.Status.APPLIED
+    assert StocktakeLedgerEntry.objects.filter(stocktake_id=stocktake_id, delta=-2).exists()
+
+
+def test_stocktake_uses_condition_bucket_as_expected_baseline():
+    makerspace = make_space("ops-stocktake-damaged")
+    manager = make_member("ops-stocktake-damaged-manager", makerspace, membership_role="inventory_manager", role=User.Role.REQUESTER)
+    superadmin = make_user("ops-stocktake-damaged-super", role=User.Role.SUPERADMIN, access_status=User.AccessStatus.ACTIVE)
+    product = make_product(makerspace, available_quantity=10, damaged_quantity=2, total_quantity=12)
+    manager_client = authenticated_client(manager)
+    created = manager_client.post(f"/api/v1/admin/makerspace/{makerspace.id}/stocktakes", {"notes": "Damaged count"}, format="json")
+
+    counted = manager_client.post(
+        f"/api/v1/admin/stocktakes/{created.data['id']}/count-lines",
+        {"product_id": product.id, "counted_quantity": 2, "condition": "damaged"},
+        format="json",
+    )
+    manager_client.post(f"/api/v1/admin/stocktakes/{created.data['id']}/complete")
+    super_client = authenticated_client(superadmin)
+    super_client.post(f"/api/v1/admin/stocktakes/{created.data['id']}/approve")
+    applied = super_client.post(f"/api/v1/admin/stocktakes/{created.data['id']}/apply-adjustments")
+
+    assert counted.status_code == 201
+    assert counted.data["expected_quantity"] == 2
+    assert counted.data["variance_quantity"] == 0
+    assert applied.status_code == 200
+    product.refresh_from_db()
+    assert product.damaged_quantity == 2
+    assert StocktakeLedgerEntry.objects.filter(stocktake_id=created.data["id"]).count() == 0
+
+
+def test_stocktake_apply_is_guarded_after_row_lock():
+    makerspace = make_space("ops-stocktake-idempotent")
+    manager = make_member("ops-stocktake-idempotent-manager", makerspace, membership_role="inventory_manager", role=User.Role.REQUESTER)
+    superadmin = make_user("ops-stocktake-idempotent-super", role=User.Role.SUPERADMIN, access_status=User.AccessStatus.ACTIVE)
+    product = make_product(makerspace, available_quantity=5, total_quantity=5)
+    manager_client = authenticated_client(manager)
+    created = manager_client.post(f"/api/v1/admin/makerspace/{makerspace.id}/stocktakes", {"notes": "Apply once"}, format="json")
+    manager_client.post(
+        f"/api/v1/admin/stocktakes/{created.data['id']}/count-lines",
+        {"product_id": product.id, "counted_quantity": 4, "condition": "available"},
+        format="json",
+    )
+    manager_client.post(f"/api/v1/admin/stocktakes/{created.data['id']}/complete")
+    super_client = authenticated_client(superadmin)
+    super_client.post(f"/api/v1/admin/stocktakes/{created.data['id']}/approve")
+
+    first = super_client.post(f"/api/v1/admin/stocktakes/{created.data['id']}/apply-adjustments")
+    second = super_client.post(f"/api/v1/admin/stocktakes/{created.data['id']}/apply-adjustments")
+
+    assert first.status_code == 200
+    assert second.status_code == 400
+    product.refresh_from_db()
+    assert product.available_quantity == 4
+    assert InventoryAdjustment.objects.filter(stocktake_id=created.data["id"]).count() == 1
+
+
+def test_stocktake_asset_status_updates_product_buckets_from_ledger():
+    makerspace = make_space("ops-stocktake-asset")
+    manager = make_member("ops-stocktake-asset-manager", makerspace, membership_role="inventory_manager", role=User.Role.REQUESTER)
+    superadmin = make_user("ops-stocktake-asset-super", role=User.Role.SUPERADMIN, access_status=User.AccessStatus.ACTIVE)
+    product = make_product(makerspace, tracking_mode=TrackingMode.INDIVIDUAL, available_quantity=1, total_quantity=1)
+    asset = InventoryAsset.objects.create(makerspace=makerspace, product=product, asset_tag="STOCKTAKE-ASSET-1")
+    manager_client = authenticated_client(manager)
+    created = manager_client.post(f"/api/v1/admin/makerspace/{makerspace.id}/stocktakes", {"notes": "Missing asset"}, format="json")
+    manager_client.post(
+        f"/api/v1/admin/stocktakes/{created.data['id']}/count-lines",
+        {"asset_id": asset.id, "counted_quantity": 0, "condition": "available"},
+        format="json",
+    )
+    manager_client.post(f"/api/v1/admin/stocktakes/{created.data['id']}/complete")
+    super_client = authenticated_client(superadmin)
+    super_client.post(f"/api/v1/admin/stocktakes/{created.data['id']}/approve")
+
+    applied = super_client.post(f"/api/v1/admin/stocktakes/{created.data['id']}/apply-adjustments")
+
+    assert applied.status_code == 200
+    asset.refresh_from_db()
+    product.refresh_from_db()
+    assert asset.status == InventoryAsset.Status.LOST
+    assert (product.available_quantity, product.lost_quantity, product.total_quantity) == (0, 1, 1)
+    assert set(StocktakeLedgerEntry.objects.filter(stocktake_id=created.data["id"]).values_list("bucket", "delta")) == {
+        ("available", -1),
+        ("lost", 1),
+    }
 
 
 def test_superadmin_cannot_approve_or_apply_hidden_makerspace_stocktake():
