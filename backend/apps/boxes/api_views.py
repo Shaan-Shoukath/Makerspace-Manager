@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 
 from apps.accounts import rbac
 from apps.accounts.models import User
+from apps.admin_api.permissions import IsActiveStaff
 from apps.audit import services as audit
 from apps.boxes.models import Box, QrCode, QrScanEvent
 from apps.boxes.qr_render import render_qr_label_svg
@@ -243,6 +244,8 @@ class QrRevokeView(QrPermissionMixin, APIView):
 
 
 class QrRebindTargetView(APIView):
+    permission_classes = [IsActiveStaff]
+
     @extend_schema(
         tags=["QR assets"],
         summary=(

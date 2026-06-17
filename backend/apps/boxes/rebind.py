@@ -44,7 +44,14 @@ def rebind_qr_target(user, qr_id, data):
     qr.makerspace_id = target.makerspace_id
     qr.target_type = target_type
     qr.target_id = target.id
-    qr.save(update_fields=["makerspace", "target_type", "target_id", "updated_at"])
+    try:
+        with transaction.atomic():
+            qr.save(update_fields=["makerspace", "target_type", "target_id", "updated_at"])
+    except IntegrityError:
+        return Response(
+            {"detail": "Target already has an active QR code."},
+            status=status.HTTP_409_CONFLICT,
+        )
 
     new_name = data.get("new_name", "").strip()
     if new_name:
@@ -83,8 +90,11 @@ def _require_rebind_permission(user, qr, target, target_type, cross):
     if cross:
         if not (user.is_superuser or user.role == User.Role.SUPERADMIN):
             raise PermissionDenied()
-        if target_type == QrCode.TargetType.ASSET:
-            raise ValidationError("Assets cannot be rebound across makerspaces.")
+        if (
+            qr.target_type != QrCode.TargetType.PRODUCT
+            or target_type != QrCode.TargetType.PRODUCT
+        ):
+            raise ValidationError("Only products can be rebound across makerspaces.")
         require_module(target.makerspace, "qr_management")
         return
     allowed = rbac.can(user, rbac.Action.MANAGE_QR, qr.makerspace_id) and rbac.can(
@@ -98,7 +108,8 @@ def _require_rebind_permission(user, qr, target, target_type, cross):
 
 def _target_has_qr(qr, target, target_type):
     return (
-        QrCode.objects.filter(
+        QrCode.objects.select_for_update()
+        .filter(
             makerspace_id=target.makerspace_id,
             target_type=target_type,
             target_id=target.id,

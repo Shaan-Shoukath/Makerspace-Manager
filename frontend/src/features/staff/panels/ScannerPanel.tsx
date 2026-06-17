@@ -2,15 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
 import QrScanner from "../../../components/ui/QrScanner";
-import { staffRequest } from "../../../lib/api";
+import { staffRequest, type StaffAuthUser } from "../../../lib/api";
 import { Panel, type Makerspace, type Product, useStaffGet } from "./shared";
 
 type ResolveTarget =
   | { type: "product"; id: number; name: string }
   | { type: "asset"; id: number; asset_tag: string; product: string; status: string }
   | { type: "box"; id: number; label: string; code: string };
-type Resolved = { qr: { id: number; makerspace: number; payload: string; status: string }; target: ResolveTarget; allowed_actions: string[] };
-type Rebound = { qr: { id: number; makerspace: number; payload: string; status: string }; target: ResolveTarget };
+type ResolvedQr = { id: number; makerspace: number; makerspace_id?: number; payload: string; status: string };
+type Resolved = { qr: ResolvedQr; target: ResolveTarget; allowed_actions: string[] };
+type Rebound = { qr: ResolvedQr; target: ResolveTarget };
 type BoxContents = {
   products: { id: number; name: string; available_quantity: number }[];
   assets: { id: number; asset_tag: string; product: string; status: string }[];
@@ -36,16 +37,21 @@ export function ScannerPanel({ makerspace, isSuperadmin, makerspaces }: {
   const [resolved, setResolved] = useState<Resolved | null>(null);
   const [contents, setContents] = useState<BoxContents | null>(null);
   const [showRebind, setShowRebind] = useState(false);
-  const [selectedMakerspaceId, setSelectedMakerspaceId] = useState(makerspace.id);
   const [selectedProductId, setSelectedProductId] = useState("");
   const [newName, setNewName] = useState("");
   const [successNote, setSuccessNote] = useState<string | null>(null);
+  const resolvedQrMakerspaceId = resolved?.qr.makerspace_id ?? resolved?.qr.makerspace;
+  const rebindMakerspaceId = resolvedQrMakerspaceId ?? makerspace.id;
+  const rebindMakerspace = makerspaces.find((space) => space.id === rebindMakerspaceId) ?? (
+    makerspace.id === rebindMakerspaceId ? makerspace : undefined
+  );
 
   const products = useStaffGet<ListResponse<Product>>(
-    ["inventory-all", selectedMakerspaceId],
-    `/admin/makerspace/${selectedMakerspaceId}/inventory?page_size=1000`,
-    showRebind && Boolean(selectedMakerspaceId),
+    ["inventory-all", rebindMakerspaceId],
+    `/admin/makerspace/${rebindMakerspaceId}/inventory?page_size=1000`,
+    showRebind && Boolean(resolvedQrMakerspaceId),
   );
+  const currentUser = useStaffGet<StaffAuthUser>(["staff", "me"], "/auth/me");
   const productRows = useMemo(() => rows(products.data), [products.data]);
 
   const resolve = useMutation({
@@ -54,6 +60,9 @@ export function ScannerPanel({ makerspace, isSuperadmin, makerspaces }: {
     onSuccess: (data) => {
       setResolved(data);
       setContents(null);
+      setShowRebind(false);
+      setSelectedProductId("");
+      setNewName("");
       setSuccessNote(null);
     },
   });
@@ -90,10 +99,6 @@ export function ScannerPanel({ makerspace, isSuperadmin, makerspaces }: {
   });
 
   useEffect(() => {
-    setSelectedMakerspaceId(makerspace.id);
-  }, [makerspace.id]);
-
-  useEffect(() => {
     if (!productRows.length) {
       setSelectedProductId("");
       return;
@@ -112,10 +117,14 @@ export function ScannerPanel({ makerspace, isSuperadmin, makerspaces }: {
   const revokeError = revoke.error instanceof Error ? revoke.error.message : undefined;
   const rebindError = rebind.error instanceof Error ? rebind.error.message : undefined;
   const productError = products.error instanceof Error ? products.error.message : undefined;
+  const rebindRole = currentUser.data?.makerspaces.find(
+    (item) => item.id === resolvedQrMakerspaceId,
+  )?.role;
+  const hasRebindPermissions = isSuperadmin || ["space_manager", "inventory_manager"].includes(rebindRole ?? "");
   // Rebind UI only targets PRODUCT QRs (the cross-makerspace quantity-product
   // transfer scenario). The form always submits target_type "product", so offering
   // it for an asset QR would silently convert that QR's type — disallow it here.
-  const canRebind = Boolean(resolved && target && target.type === "product");
+  const canRebind = Boolean(resolved && target && target.type === "product" && hasRebindPermissions);
 
   return (
     <Panel title="Scanner">
@@ -168,20 +177,12 @@ export function ScannerPanel({ makerspace, isSuperadmin, makerspaces }: {
               }}
             >
               <label className="grid gap-1">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted">Target makerspace</span>
-                {isSuperadmin ? (
-                  <select
-                    className="desk-input"
-                    value={selectedMakerspaceId}
-                    onChange={(event) => setSelectedMakerspaceId(Number(event.target.value))}
-                  >
-                    {(makerspaces.length ? makerspaces : [makerspace]).map((space) => (
-                      <option key={space.id} value={space.id}>{space.name}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input className="desk-input" value={makerspace.name} disabled />
-                )}
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted">QR makerspace</span>
+                <input
+                  className="desk-input"
+                  value={rebindMakerspace?.name ?? `Makerspace #${rebindMakerspaceId}`}
+                  disabled
+                />
               </label>
               <label className="grid gap-1">
                 <span className="text-xs font-semibold uppercase tracking-wide text-muted">Target product</span>
