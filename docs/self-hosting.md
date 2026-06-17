@@ -18,6 +18,10 @@ POSTGRES_PASSWORD=replace-with-a-strong-password
 SECRET_KEY=replace-with-a-long-random-secret
 ALLOWED_HOSTS=inventory.example.org
 CORS_ALLOWED_ORIGINS=https://inventory.example.org
+MINIO_ROOT_USER=replace-with-a-random-access-key
+MINIO_ROOT_PASSWORD=replace-with-a-long-random-secret
+AWS_S3_PUBLIC_ENDPOINT_URL=https://files.inventory.example.org
+MINIO_CORS_ALLOWED_ORIGINS_JSON=["https://inventory.example.org"]
 MAKERSPACE_IMAGE_TAG=latest
 ```
 
@@ -138,23 +142,59 @@ previously stored tokens/passwords can no longer be decrypted.
 | `DATABASE_URL` | no | Overrides the default Postgres URL (e.g. point at Supabase) |
 | `CORS_ALLOWED_ORIGINS` | no | Browser origins allowed to call the API |
 | `API_CLIENT_ENC_KEY` | recommended | Fernet key encrypting integration secrets at rest |
+| `MINIO_ROOT_USER` | yes | MinIO/S3 access key used by the backend |
+| `MINIO_ROOT_PASSWORD` | yes | MinIO/S3 secret key used by the backend |
+| `AWS_STORAGE_BUCKET_NAME` | no (default `evidence`) | Private object-storage bucket for evidence and print files |
+| `AWS_S3_ENDPOINT_URL` | no (default `http://minio:9000`) | Backend-to-MinIO endpoint inside Compose |
+| `AWS_S3_PUBLIC_ENDPOINT_URL` | yes for uploads | Browser-reachable MinIO/S3 endpoint used in presigned URLs |
+| `MINIO_CORS_ALLOWED_ORIGINS_JSON` | yes for uploads | JSON array of frontend origins allowed to POST/GET objects |
 | `ENABLE_HTTPS` | no (default false) | Turns on SSL redirect, Secure cookies, HSTS |
 | `CSRF_TRUSTED_ORIGINS` | when HTTPS | `https://` origin(s) trusted for login POSTs |
 | `AXES_FAILURE_LIMIT` | no (default 5) | Failed admin logins before lockout |
 | `HTTP_PORT` | no (default 80) | Published frontend port |
 | `EMAIL_*`, `DEFAULT_FROM_EMAIL` | no | Global fallback SMTP (per-makerspace SMTP overrides it) |
 
+## Object Storage
+
+Production Compose includes MinIO because the backend stores evidence photos and 3D-print files in
+S3-compatible object storage by default. The backend talks to MinIO at `http://minio:9000`; browsers
+use `AWS_S3_PUBLIC_ENDPOINT_URL` in presigned upload/download URLs, so that value must be reachable
+from staff/requester browsers.
+
+For HTTPS deployments, put MinIO behind the same TLS proxy as the frontend, for example:
+
+```env
+AWS_S3_PUBLIC_ENDPOINT_URL=https://files.inventory.example.org
+MINIO_CORS_ALLOWED_ORIGINS_JSON=["https://inventory.example.org"]
+```
+
+If you expose MinIO directly on a LAN during a local pilot, set `AWS_S3_PUBLIC_ENDPOINT_URL` to the
+server address and port that browsers can reach, for example `http://192.168.1.20:9000`. The MinIO
+console binds to `127.0.0.1:9001` by default; keep it private or put it behind authenticated VPN/admin
+access.
+
 ## Backups
 
-All data lives in the `makerspace_manager_pgdata` Docker volume. Back it up before upgrades:
+Operational data lives in Postgres and object files live in the `minio_data` Docker volume. Back up
+both before upgrades:
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T db \
   pg_dump -U makerspace makerspace_manager > backup-$(date +%F).sql
+
+mkdir -p backups
+docker compose -f docker-compose.prod.yml run --rm --entrypoint sh \
+  -v "$PWD/backups:/backup" \
+  minio \
+  -c 'tar -czf /backup/minio-$(date +%F).tgz -C /data .'
 ```
 
 Also keep a copy of your `.env` (it holds `API_CLIENT_ENC_KEY`, without which encrypted integration
-secrets are unrecoverable).
+secrets are unrecoverable, and the MinIO credentials needed to read object backups).
+
+Restore order is database first, then object files. Stop the stack, restore the Postgres dump into the
+`db` service, unpack the MinIO archive into the `minio_data` volume, then start the stack and check
+`/api/v1/health/readiness/`.
 
 ## Tenant Frontends
 

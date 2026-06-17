@@ -13,6 +13,52 @@ services:
       timeout: 5s
       retries: 6
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_API_BIND:-0.0.0.0}:${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_BIND:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  createbuckets:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      AWS_STORAGE_BUCKET_NAME: ${AWS_STORAGE_BUCKET_NAME:-evidence}
+      MINIO_CORS_ALLOWED_ORIGINS_JSON: '${MINIO_CORS_ALLOWED_ORIGINS_JSON:-["http://localhost"]}'
+    entrypoint: |
+      /bin/sh -c '
+      until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 1; done;
+      mc mb --ignore-existing "local/$$AWS_STORAGE_BUCKET_NAME";
+      mc anonymous set none "local/$$AWS_STORAGE_BUCKET_NAME";
+      cat > /tmp/cors.json <<EOF
+      [
+        {
+          "AllowedOrigins": $$MINIO_CORS_ALLOWED_ORIGINS_JSON,
+          "AllowedMethods": ["PUT", "POST", "GET", "HEAD"],
+          "AllowedHeaders": ["*"],
+          "ExposeHeaders": ["ETag"],
+          "MaxAgeSeconds": 3000
+        }
+      ]
+      EOF
+      mc cors set "local/$$AWS_STORAGE_BUCKET_NAME" /tmp/cors.json;
+      '
+
   backend:
     image: ${MAKERSPACE_BACKEND_IMAGE:-ghcr.io/shaan-shoukath/makerspace-manager-backend}:${MAKERSPACE_IMAGE_TAG:-latest}
     environment:
@@ -34,6 +80,11 @@ services:
       EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
       EMAIL_USE_TLS: ${EMAIL_USE_TLS:-True}
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-Makerspace <noreply@example.com>}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      AWS_STORAGE_BUCKET_NAME: ${AWS_STORAGE_BUCKET_NAME:-evidence}
+      AWS_S3_ENDPOINT_URL: ${AWS_S3_ENDPOINT_URL:-http://minio:9000}
+      AWS_S3_PUBLIC_ENDPOINT_URL: ${AWS_S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
     command: >
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
@@ -46,6 +97,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
 
   frontend:
     image: ${MAKERSPACE_FRONTEND_IMAGE:-ghcr.io/shaan-shoukath/makerspace-manager-frontend}:${MAKERSPACE_IMAGE_TAG:-latest}
@@ -62,3 +115,4 @@ services:
 
 volumes:
   makerspace_manager_pgdata:
+  minio_data:
