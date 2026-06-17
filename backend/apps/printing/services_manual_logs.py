@@ -1,9 +1,10 @@
 from decimal import Decimal
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 
 from apps.audit import services as audit
-from apps.printing.models import FilamentSpool, ManualPrintLog
+from apps.printing.models import FilamentSpool, ManualPrintLog, PrintPrinter
 from apps.printing.workflow import InvalidTransition
 
 
@@ -17,8 +18,16 @@ def log_manual_print(
     note,
 ):
     with transaction.atomic():
+        try:
+            printer = PrintPrinter.objects.select_for_update().get(pk=printer.pk)
+        except ObjectDoesNotExist as exc:
+            raise InvalidTransition("Printer was not found.") from exc
         if printer.makerspace_id != makerspace.id:
             raise InvalidTransition("Printer must belong to this makerspace.")
+        if not printer.is_active or printer.status != PrintPrinter.Status.ACTIVE:
+            raise InvalidTransition("Printer is not active.")
+        if grams_used <= 0:
+            raise InvalidTransition("Filament used must be greater than zero.")
         spool = FilamentSpool.objects.select_for_update().get(pk=filament_spool.pk)
         if spool.makerspace_id != makerspace.id:
             raise InvalidTransition("Filament spool must belong to this makerspace.")

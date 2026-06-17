@@ -79,6 +79,7 @@ export function ManualPrintLogSection({
       // The deduction also feeds printer cards (active spool remaining), so refresh them too.
       queryClient.invalidateQueries({ queryKey: ["print-printers", makerspace.id] });
       queryClient.invalidateQueries({ queryKey: ["manual-print-logs", makerspace.id] });
+      queryClient.invalidateQueries({ queryKey: ["operations-report", "printing"] });
     },
   });
 

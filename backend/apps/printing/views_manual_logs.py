@@ -38,8 +38,16 @@ class ManualPrintLogListCreateView(ManagedPrinterMixin, generics.ListCreateAPIVi
         makerspace_id = data["makerspace_id"]
         self.assert_can_manage_makerspace(makerspace_id)
         makerspace = get_object_or_404(Makerspace, pk=makerspace_id)
-        printer = get_object_or_404(PrintPrinter, pk=data["printer_id"])
-        spool = get_object_or_404(FilamentSpool, pk=data["filament_spool_id"])
+        printer = get_object_or_404(
+            PrintPrinter,
+            pk=data["printer_id"],
+            makerspace=makerspace,
+        )
+        spool = get_object_or_404(
+            FilamentSpool,
+            pk=data["filament_spool_id"],
+            makerspace=makerspace,
+        )
         try:
             log = services_manual_logs.log_manual_print(
                 request.user,
