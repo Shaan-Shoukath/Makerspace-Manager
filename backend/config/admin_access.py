@@ -132,9 +132,11 @@ class SuperuserOnlyModelAdmin:
 
         if self.model is Makerspace:
             # Governance visibility: a superadmin can see that a hidden
-            # makerspace exists in /control/, while object-level permission
-            # checks below still block opening/changing/deleting it.
-            return queryset
+            # makerspace exists in the changelist only. Other admin contexts
+            # such as object pages, autocomplete, and FK widgets stay scoped.
+            url_name = getattr(getattr(request, "resolver_match", None), "url_name", "") or ""
+            if url_name.endswith("_changelist"):
+                return queryset
 
         from apps.accounts import rbac
 

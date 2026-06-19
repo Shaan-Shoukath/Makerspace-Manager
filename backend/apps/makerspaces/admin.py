@@ -48,7 +48,7 @@ class MakerspaceAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
         "slug",
         "location",
         "public_inventory_enabled",
-        "superadmin_access_enabled",
+        "superadmin_access",
         "frontend_domain",
         "hidden_from_central_directory",
         "frontend_mode",
@@ -76,11 +76,6 @@ class MakerspaceAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
         ),
     )
     inlines = (MakerspaceMembershipInline,)
-
-    def has_view_permission(self, request, obj=None):
-        if obj is not None and not obj.superadmin_access_enabled:
-            return self._has_superuser_access(request)
-        return super().has_view_permission(request, obj)
 
     def has_change_permission(self, request, obj=None):
         if obj is not None and not obj.superadmin_access_enabled:
@@ -121,6 +116,10 @@ class MakerspaceAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
     @admin.display(boolean=True, description="Archived")
     def archived(self, obj):
         return obj.archived_at is not None
+
+    @admin.display(description="Superadmin access")
+    def superadmin_access(self, obj):
+        return "Yes" if obj.superadmin_access_enabled else "No"
 
     @admin.display(description="Frontend mode")
     def frontend_mode(self, obj):

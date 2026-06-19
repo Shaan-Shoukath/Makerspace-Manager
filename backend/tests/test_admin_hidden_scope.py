@@ -1,9 +1,15 @@
+from types import SimpleNamespace
+
 import pytest
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import RequestFactory
+from django.urls import reverse
+from django.utils import timezone
 
 from apps.accounts.models import User
+from apps.makerspaces import lifecycle
 from apps.inventory.models import InventoryProduct
 from apps.makerspaces.models import Makerspace, MakerspaceMembership
 from config.admin_access import GLOBAL_ADMIN_MODELS
@@ -153,11 +159,132 @@ def test_makerspace_admin_lists_disabled_makerspace_for_governance_visibility():
     )
     request = RequestFactory().get("/control/makerspaces/makerspace/")
     request.user = superadmin
+    request.resolver_match = SimpleNamespace(url_name="makerspaces_makerspace_changelist")
 
     queryset = admin.site._registry[Makerspace].get_queryset(request)
 
     assert hidden_space in queryset
     assert visible_space in queryset
+
+
+def test_makerspace_changelist_shows_hidden_and_visible_makerspaces(client):
+    hidden_space = Makerspace.objects.create(
+        name="Hidden Changelist",
+        slug="hidden-changelist",
+        superadmin_access_enabled=False,
+    )
+    visible_space = Makerspace.objects.create(
+        name="Visible Changelist",
+        slug="visible-changelist",
+    )
+    superadmin = get_user_model().objects.create_user(
+        username="changelist-superadmin",
+        email="changelist-superadmin@example.com",
+        password="test-pass",
+        role=User.Role.SUPERADMIN,
+        access_status=User.AccessStatus.ACTIVE,
+        is_staff=True,
+        is_superuser=True,
+    )
+    client.force_login(superadmin)
+
+    response = client.get(reverse("admin:makerspaces_makerspace_changelist"))
+
+    assert response.status_code == 200
+    html = response.content.decode()
+    assert hidden_space.name in html
+    assert visible_space.name in html
+
+
+def test_makerspace_change_page_denies_hidden_and_allows_visible(client):
+    hidden_space = Makerspace.objects.create(
+        name="Hidden Change",
+        slug="hidden-change",
+        superadmin_access_enabled=False,
+    )
+    visible_space = Makerspace.objects.create(
+        name="Visible Change",
+        slug="visible-change",
+    )
+    superadmin = get_user_model().objects.create_user(
+        username="change-page-superadmin",
+        email="change-page-superadmin@example.com",
+        password="test-pass",
+        role=User.Role.SUPERADMIN,
+        access_status=User.AccessStatus.ACTIVE,
+        is_staff=True,
+        is_superuser=True,
+    )
+    client.force_login(superadmin)
+
+    hidden_response = client.get(
+        reverse("admin:makerspaces_makerspace_change", args=[hidden_space.pk])
+    )
+    visible_response = client.get(
+        reverse("admin:makerspaces_makerspace_change", args=[visible_space.pk])
+    )
+
+    assert hidden_response.status_code in {302, 403, 404}
+    assert visible_response.status_code == 200
+
+
+def test_makerspace_autocomplete_hides_disabled_makerspaces(client):
+    hidden_space = Makerspace.objects.create(
+        name="Hidden Autocomplete",
+        slug="hidden-autocomplete",
+        superadmin_access_enabled=False,
+    )
+    visible_space = Makerspace.objects.create(
+        name="Visible Autocomplete",
+        slug="visible-autocomplete",
+    )
+    superadmin = get_user_model().objects.create_user(
+        username="autocomplete-superadmin",
+        email="autocomplete-superadmin@example.com",
+        password="test-pass",
+        role=User.Role.SUPERADMIN,
+        access_status=User.AccessStatus.ACTIVE,
+        is_staff=True,
+        is_superuser=True,
+    )
+    client.force_login(superadmin)
+
+    response = client.get(
+        reverse("admin:autocomplete"),
+        {
+            "app_label": "inventory",
+            "model_name": "category",
+            "field_name": "makerspace",
+            "term": "Autocomplete",
+        },
+    )
+
+    assert response.status_code == 200
+    result_text = {row["text"] for row in response.json()["results"]}
+    assert str(hidden_space) not in result_text
+    assert str(visible_space) in result_text
+
+
+def test_unarchive_rejects_hidden_makerspace():
+    superadmin = get_user_model().objects.create_user(
+        username="hidden-unarchive-superadmin",
+        email="hidden-unarchive-superadmin@example.com",
+        password="test-pass",
+        role=User.Role.SUPERADMIN,
+        access_status=User.AccessStatus.ACTIVE,
+        is_staff=True,
+        is_superuser=True,
+    )
+    hidden_space = Makerspace.objects.create(
+        name="Hidden Unarchive",
+        slug="hidden-unarchive",
+        superadmin_access_enabled=False,
+        archived_at=timezone.now(),
+        archived_by=superadmin,
+    )
+
+    with pytest.raises(ValidationError, match="Cannot unarchive a hidden makerspace."):
+        lifecycle.unarchive(hidden_space, superadmin)
 
 
 def test_makerspace_admin_lists_superadmin_status_and_frontend_mode():
@@ -170,6 +297,9 @@ def test_makerspace_admin_lists_superadmin_status_and_frontend_mode():
     model_admin = admin.site._registry[Makerspace]
 
     assert "location" in model_admin.list_display
-    assert "superadmin_access_enabled" in model_admin.list_display
+    assert "superadmin_access" in model_admin.list_display
+    assert "superadmin_access_enabled" not in model_admin.list_display
+    assert "superadmin_access_enabled" in model_admin.list_filter
+    assert model_admin.superadmin_access(makerspace) == "No"
     assert "frontend_mode" in model_admin.list_display
     assert model_admin.frontend_mode(makerspace) == "single-tenant"

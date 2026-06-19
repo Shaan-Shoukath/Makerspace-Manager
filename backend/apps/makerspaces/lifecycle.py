@@ -30,6 +30,8 @@ def archive(makerspace, actor):
 def unarchive(makerspace, actor):
     with transaction.atomic():
         locked = makerspace.__class__.objects.select_for_update().get(pk=makerspace.pk)
+        if not locked.superadmin_access_enabled:
+            raise ValidationError("Cannot unarchive a hidden makerspace.")
         if locked.archived_at is None:
             raise ValidationError("Makerspace is not archived.")
 

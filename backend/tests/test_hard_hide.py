@@ -341,7 +341,7 @@ def test_django_admin_object_permissions_keep_hidden_makerspace_audit_only():
 
     assert product_admin.has_view_permission(request, hidden_product) is False
     assert product_admin.has_change_permission(request, hidden_product) is False
-    assert makerspace_admin.has_view_permission(request, hidden) is True
+    assert makerspace_admin.has_view_permission(request, hidden) is False
     assert makerspace_admin.has_change_permission(request, hidden) is False
     assert makerspace_admin.has_delete_permission(request, hidden) is False
     assert makerspace_admin.get_inline_instances(request, hidden) == []
