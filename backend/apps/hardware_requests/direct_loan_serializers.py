@@ -26,6 +26,8 @@ class DirectLoanIssueSerializer(serializers.Serializer):
 
 
 class DirectLoanReturnSerializer(serializers.Serializer):
+    evidence_id = serializers.IntegerField()
+    notes = serializers.CharField()
     returned_by_identifier = serializers.CharField(required=False, allow_blank=True)
 
 
@@ -39,6 +41,8 @@ class DirectLoanSerializer(PublicToolLoanSerializer):
     container_id = serializers.IntegerField(read_only=True)
     container_label = serializers.SerializerMethodField()
     due_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    return_evidence_id = serializers.IntegerField(read_only=True, allow_null=True)
+    return_notes = serializers.CharField(read_only=True, allow_blank=True)
     source = serializers.CharField(read_only=True)
     issued_by = serializers.SerializerMethodField()
 

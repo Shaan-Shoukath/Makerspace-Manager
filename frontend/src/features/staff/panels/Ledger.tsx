@@ -7,6 +7,8 @@ type LedgerSource = "request" | "self_checkout" | "direct_handout";
 type LedgerRow = {
   source: LedgerSource;
   item_name: string;
+  units: Array<{ asset_tag: string; serial_number: string }>;
+  target_label: string | null;
   holder: string;
   quantity: number;
   since: string | null;
@@ -117,7 +119,10 @@ export function Ledger({ makerspace, isSuperadmin }: { makerspace: Makerspace; i
                   const overdue = isOverdue(row.due, now);
                   return (
                     <tr key={`${row.source}-${row.reference_id}-${row.makerspace_id}-${row.item_name}`} className={overdue ? "bg-red-50/80" : ""}>
-                      <td className="whitespace-nowrap px-3 py-2 font-medium text-ink">{row.item_name}</td>
+                      <td className="whitespace-nowrap px-3 py-2">
+                        <div className="font-medium text-ink">{row.item_name}</div>
+                        <UnitLines row={row} />
+                      </td>
                       <td className="whitespace-nowrap px-3 py-2 text-ink">{row.holder}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-right font-semibold text-ink">{row.quantity}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-muted">{formatDate(row.since)}</td>
@@ -140,6 +145,23 @@ export function Ledger({ makerspace, isSuperadmin }: { makerspace: Makerspace; i
       </div>
     </Panel>
   );
+}
+
+function UnitLines({ row }: { row: LedgerRow }) {
+  if (row.units.length) {
+    return (
+      <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted">
+        {row.units.map((unit) => (
+          <span key={`${unit.asset_tag}-${unit.serial_number || "no-serial"}`}>
+            #{unit.asset_tag}
+            {unit.serial_number ? ` · ${unit.serial_number}` : ""}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  return row.target_label ? <div className="mt-0.5 text-xs text-muted">{row.target_label}</div> : null;
 }
 
 function SortableHeader({

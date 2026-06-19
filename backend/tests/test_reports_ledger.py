@@ -4,8 +4,13 @@ import pytest
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.hardware_requests.models import HardwareRequest, HardwareRequestItem, PublicToolLoan
-from apps.inventory.models import InventoryAsset
+from apps.hardware_requests.models import (
+    HardwareRequest,
+    HardwareRequestItem,
+    HardwareRequestItemAsset,
+    PublicToolLoan,
+)
+from apps.inventory.models import InventoryAsset, TrackingMode
 from tests.return_helpers import authenticated_client, make_member, make_product, make_space, make_user
 
 pytestmark = pytest.mark.django_db
@@ -203,6 +208,117 @@ def test_ledger_reports_every_item_of_a_bundled_loan():
     assert rows["Cordless Drill"]["quantity"] == 1
     assert rows["Bit Set"]["quantity"] == 4
     assert all(row["source"] == "self_checkout" for row in response.data["results"])
+
+
+def test_ledger_includes_units_and_target_label_for_individual_self_checkout():
+    makerspace = make_space("ledger-individual-self")
+    manager = make_member("ledger-individual-self-manager", makerspace)
+    product = make_product(
+        makerspace,
+        name="Thermal Camera",
+        tracking_mode=TrackingMode.INDIVIDUAL,
+        total_quantity=1,
+        available_quantity=0,
+        issued_quantity=1,
+    )
+    asset = InventoryAsset.objects.create(
+        makerspace=makerspace,
+        product=product,
+        asset_tag="TC-001",
+        serial_number="SN-TC-001",
+        status=InventoryAsset.Status.ISSUED,
+    )
+    loan = _self_checkout_loan(makerspace, product, "ledger-individual-holder")
+    loan.asset_ids = [asset.id]
+    loan.target_label = "Asset TC-001"
+    loan.save(update_fields=["asset_ids", "target_label"])
+
+    response = authenticated_client(manager).get(
+        f"/api/v1/admin/makerspace/{makerspace.id}/ledger"
+    )
+
+    assert response.status_code == 200
+    row = response.data["results"][0]
+    assert row["source"] == "self_checkout"
+    assert row["item_name"] == "Thermal Camera"
+    assert row["units"] == [
+        {"asset_tag": "TC-001", "serial_number": "SN-TC-001"}
+    ]
+    assert row["target_label"] == "Asset TC-001"
+
+
+def test_ledger_quantity_tracked_loan_has_empty_units():
+    makerspace = make_space("ledger-quantity-units")
+    manager = make_member("ledger-quantity-units-manager", makerspace)
+    product = make_product(makerspace, name="Clamp Meter")
+    _self_checkout_loan(makerspace, product, "ledger-quantity-holder")
+
+    response = authenticated_client(manager).get(
+        f"/api/v1/admin/makerspace/{makerspace.id}/ledger"
+    )
+
+    assert response.status_code == 200
+    assert response.data["results"][0]["item_name"] == "Clamp Meter"
+    assert response.data["results"][0]["units"] == []
+
+
+def test_ledger_reviewed_request_units_come_from_issued_asset_links():
+    makerspace = make_space("ledger-reviewed-units")
+    manager = make_member("ledger-reviewed-units-manager", makerspace)
+    product = make_product(
+        makerspace,
+        name="Spectrum Analyzer",
+        tracking_mode=TrackingMode.INDIVIDUAL,
+        total_quantity=2,
+        available_quantity=0,
+        issued_quantity=2,
+    )
+    issued_asset = InventoryAsset.objects.create(
+        makerspace=makerspace,
+        product=product,
+        asset_tag="SA-ISSUED",
+        serial_number="SN-SA-1",
+        status=InventoryAsset.Status.ISSUED,
+    )
+    returned_asset = InventoryAsset.objects.create(
+        makerspace=makerspace,
+        product=product,
+        asset_tag="SA-RETURNED",
+        serial_number="SN-SA-2",
+        status=InventoryAsset.Status.AVAILABLE,
+    )
+    request = _request_loan(
+        makerspace,
+        product,
+        "ledger-reviewed-holder",
+        quantity=2,
+        returned=1,
+        status=HardwareRequest.Status.PARTIALLY_RETURNED,
+    )
+    item = request.items.get()
+    HardwareRequestItemAsset.objects.create(
+        request_item=item,
+        asset=issued_asset,
+        outcome=HardwareRequestItemAsset.Outcome.ISSUED,
+    )
+    HardwareRequestItemAsset.objects.create(
+        request_item=item,
+        asset=returned_asset,
+        outcome=HardwareRequestItemAsset.Outcome.RETURNED,
+    )
+
+    response = authenticated_client(manager).get(
+        f"/api/v1/admin/makerspace/{makerspace.id}/ledger"
+    )
+
+    assert response.status_code == 200
+    row = response.data["results"][0]
+    assert row["source"] == "request"
+    assert row["quantity"] == 1
+    assert row["target_label"] is None
+    assert row["units"] == [
+        {"asset_tag": "SA-ISSUED", "serial_number": "SN-SA-1"}
+    ]
 
 
 def test_ledger_holder_prefers_contact_email_over_checkin_username():

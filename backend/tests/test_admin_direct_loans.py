@@ -10,8 +10,23 @@ from apps.boxes.models import Box, QrCode
 from apps.hardware_requests.models import HardwareRequest, PublicToolLoan
 from apps.inventory.models import InventoryAsset, InventoryProduct, TrackingMode
 from apps.makerspaces.models import Makerspace, MakerspaceMembership
+from tests.return_helpers import make_issue_evidence, make_return_evidence
 
 pytestmark = pytest.mark.django_db
+
+
+def return_body(evidence, notes="Returned in good condition."):
+    return {"evidence_id": evidence.id, "notes": notes}
+
+
+def valid_looking_return_body():
+    return {"evidence_id": 1, "notes": "x"}
+
+
+def allow_uploaded(monkeypatch, exists=True):
+    # Test settings use STORAGE_PRESIGN_METHOD="post", so the direct-return
+    # workflow validates the upload via storage.object_exists.
+    monkeypatch.setattr("apps.evidence.storage.object_exists", lambda key: exists)
 
 
 def make_space(slug="direct-loan-space"):
@@ -55,6 +70,21 @@ def direct_url(makerspace):
     return f"/api/v1/admin/makerspace/{makerspace.id}/direct-loans"
 
 
+def issue_direct_product_loan(makerspace, admin, product=None):
+    product = product or make_product(makerspace)
+    client = authed(admin)
+    response = client.post(
+        direct_url(makerspace),
+        {
+            "identifier": "member-direct",
+            "items": [{"product_id": product.id, "quantity": 1}],
+        },
+        format="json",
+    )
+    assert response.status_code == 201
+    return client, PublicToolLoan.objects.get(), product
+
+
 def staff_verify_url(makerspace):
     return f"/api/v1/admin/makerspace/{makerspace.id}/checkin/verify"
 
@@ -66,7 +96,7 @@ def set_staff_domain(makerspace, domain):
 
 
 @override_settings(API_CLIENT_AUTH_REQUIRED=False)
-def test_admin_direct_manual_handout_and_return_logs_product():
+def test_admin_direct_manual_handout_and_return_logs_product(monkeypatch):
     makerspace = make_space()
     makerspace.default_loan_days = 10
     makerspace.save(update_fields=["default_loan_days"])
@@ -108,14 +138,21 @@ def test_admin_direct_manual_handout_and_return_logs_product():
         target_id=str(product.id),
     ).exists()
 
+    evidence = make_return_evidence(makerspace, admin)
+    allow_uploaded(monkeypatch)
     returned = client.post(
         f"/api/v1/admin/direct-loans/{loan.id}/return",
-        {},
+        return_body(evidence, notes="All good on return."),
         format="json",
     )
 
     assert returned.status_code == 200
     assert returned.data["status"] == PublicToolLoan.Status.RETURNED
+    assert returned.data["return_evidence_id"] == evidence.id
+    assert returned.data["return_notes"] == "All good on return."
+    loan.refresh_from_db()
+    assert loan.return_evidence_id == evidence.id
+    assert loan.return_notes == "All good on return."
     product.refresh_from_db()
     assert product.available_quantity == 3
     assert product.issued_quantity == 0
@@ -123,6 +160,11 @@ def test_admin_direct_manual_handout_and_return_logs_product():
         action="admin_direct.returned",
         target_type="inventory.inventoryproduct",
         target_id=str(product.id),
+    ).exists()
+    assert AuditLog.objects.filter(
+        action="evidence.attached",
+        target_type="evidence.evidencephoto",
+        target_id=str(evidence.id),
     ).exists()
 
     logs = client.get(
@@ -275,7 +317,7 @@ def test_direct_loan_rejects_different_staff_origin_for_scoped_views():
     )
     returned = client.post(
         f"/api/v1/admin/direct-loans/{loan.id}/return",
-        {},
+        valid_looking_return_body(),
         format="json",
         HTTP_ORIGIN=wrong_origin,
     )
@@ -311,12 +353,12 @@ def test_direct_return_hides_cross_tenant_and_missing_loan_ids():
 
     cross_tenant = client.post(
         f"/api/v1/admin/direct-loans/{other_loan.id}/return",
-        {},
+        valid_looking_return_body(),
         format="json",
     )
     missing = client.post(
         "/api/v1/admin/direct-loans/999999/return",
-        {},
+        valid_looking_return_body(),
         format="json",
     )
 
@@ -327,7 +369,124 @@ def test_direct_return_hides_cross_tenant_and_missing_loan_ids():
 
 
 @override_settings(API_CLIENT_AUTH_REQUIRED=False)
-def test_every_qr_in_multi_qr_direct_loan_is_tracked():
+def test_direct_return_requires_evidence_id():
+    makerspace = make_space("direct-return-missing-evidence")
+    admin = make_admin(makerspace)
+    client, loan, product = issue_direct_product_loan(makerspace, admin)
+
+    response = client.post(
+        f"/api/v1/admin/direct-loans/{loan.id}/return",
+        {"notes": "Returned in good condition."},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    loan.refresh_from_db()
+    product.refresh_from_db()
+    assert loan.status == PublicToolLoan.Status.CHECKED_OUT
+    assert product.issued_quantity == 1
+
+
+@override_settings(API_CLIENT_AUTH_REQUIRED=False)
+def test_direct_return_rejects_blank_notes():
+    makerspace = make_space("direct-return-blank-notes")
+    admin = make_admin(makerspace)
+    client, loan, _product = issue_direct_product_loan(makerspace, admin)
+    evidence = make_return_evidence(makerspace, admin)
+
+    response = client.post(
+        f"/api/v1/admin/direct-loans/{loan.id}/return",
+        return_body(evidence, notes="  "),
+        format="json",
+    )
+
+    assert response.status_code == 400
+
+
+@override_settings(API_CLIENT_AUTH_REQUIRED=False)
+def test_direct_return_rejects_issue_evidence():
+    makerspace = make_space("direct-return-wrong-evidence")
+    admin = make_admin(makerspace)
+    client, loan, _product = issue_direct_product_loan(makerspace, admin)
+    evidence = make_issue_evidence(makerspace, admin)
+
+    response = client.post(
+        f"/api/v1/admin/direct-loans/{loan.id}/return",
+        return_body(evidence),
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data["detail"] == "Invalid return evidence."
+    assert response.data["code"] == "validation_error"
+
+
+@override_settings(API_CLIENT_AUTH_REQUIRED=False)
+def test_direct_return_rejects_other_makerspace_evidence():
+    makerspace = make_space("direct-return-evidence-space")
+    other = make_space("direct-return-evidence-other")
+    admin = make_admin(makerspace)
+    other_admin = make_admin(other)
+    client, loan, _product = issue_direct_product_loan(makerspace, admin)
+    evidence = make_return_evidence(other, other_admin)
+
+    response = client.post(
+        f"/api/v1/admin/direct-loans/{loan.id}/return",
+        return_body(evidence),
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data["detail"] == "Invalid return evidence."
+    assert response.data["code"] == "validation_error"
+
+
+@override_settings(API_CLIENT_AUTH_REQUIRED=False)
+def test_direct_return_rejects_not_uploaded_evidence(monkeypatch):
+    makerspace = make_space("direct-return-not-uploaded")
+    admin = make_admin(makerspace)
+    client, loan, _product = issue_direct_product_loan(makerspace, admin)
+    evidence = make_return_evidence(makerspace, admin)
+    allow_uploaded(monkeypatch, exists=False)
+
+    response = client.post(
+        f"/api/v1/admin/direct-loans/{loan.id}/return",
+        return_body(evidence),
+        format="json",
+    )
+
+    assert response.status_code == 409
+    assert response.data["code"] == "evidence_not_uploaded"
+    assert response.data["detail"] == "Return evidence has not been uploaded."
+
+
+@override_settings(API_CLIENT_AUTH_REQUIRED=False)
+def test_direct_return_rejects_already_returned_loan(monkeypatch):
+    makerspace = make_space("direct-return-already-returned")
+    admin = make_admin(makerspace)
+    client, loan, _product = issue_direct_product_loan(makerspace, admin)
+    evidence = make_return_evidence(makerspace, admin)
+    allow_uploaded(monkeypatch)
+
+    first = client.post(
+        f"/api/v1/admin/direct-loans/{loan.id}/return",
+        return_body(evidence),
+        format="json",
+    )
+    second = client.post(
+        f"/api/v1/admin/direct-loans/{loan.id}/return",
+        return_body(evidence),
+        format="json",
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.data["code"] == "invalid_transition"
+    assert second.data["detail"] == "Direct loan is not currently checked out."
+
+
+@override_settings(API_CLIENT_AUTH_REQUIRED=False)
+def test_every_qr_in_multi_qr_direct_loan_is_tracked(monkeypatch):
     makerspace = make_space("direct-multi-qr")
     admin = make_admin(makerspace)
     product_a = make_product(makerspace, name="Soldering Iron")
@@ -358,9 +517,11 @@ def test_every_qr_in_multi_qr_direct_loan_is_tracked():
     assert reissue.status_code == 409
     assert PublicToolLoan.objects.count() == 1
 
+    evidence = make_return_evidence(makerspace, admin)
+    allow_uploaded(monkeypatch)
     returned = client.post(
         f"/api/v1/admin/direct-loans/{loan.id}/return",
-        {},
+        return_body(evidence),
         format="json",
     )
 
@@ -600,11 +761,96 @@ def test_direct_return_rejects_self_checkout_loan():
 
     response = authed(admin).post(
         f"/api/v1/admin/direct-loans/{loan.id}/return",
-        {},
+        valid_looking_return_body(),
         format="json",
     )
 
     # The admin direct-return must not touch a public self-checkout loan.
     assert response.status_code == 404
+    loan.refresh_from_db()
+    assert loan.status == PublicToolLoan.Status.CHECKED_OUT
+
+
+@override_settings(API_CLIENT_AUTH_REQUIRED=False)
+def test_direct_return_rejects_reused_evidence_across_loans(monkeypatch):
+    # One return photo per handover: a return EvidencePhoto can back at most one
+    # direct-loan return (mirrors ReturnEvent.evidence single-use for requests).
+    makerspace = make_space("direct-return-reuse")
+    admin = make_admin(makerspace)
+    client = authed(admin)
+    product_a = make_product(makerspace, name="Reuse Tool A")
+    product_b = make_product(makerspace, name="Reuse Tool B")
+    issued_a = client.post(
+        direct_url(makerspace),
+        {"identifier": "member-direct", "items": [{"product_id": product_a.id, "quantity": 1}]},
+        format="json",
+    )
+    issued_b = client.post(
+        direct_url(makerspace),
+        {"identifier": "member-direct", "items": [{"product_id": product_b.id, "quantity": 1}]},
+        format="json",
+    )
+    assert issued_a.status_code == 201
+    assert issued_b.status_code == 201
+    loan_a_id = issued_a.data["id"]
+    loan_b_id = issued_b.data["id"]
+    evidence = make_return_evidence(makerspace, admin)
+    allow_uploaded(monkeypatch)
+
+    first = client.post(
+        f"/api/v1/admin/direct-loans/{loan_a_id}/return",
+        return_body(evidence),
+        format="json",
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        f"/api/v1/admin/direct-loans/{loan_b_id}/return",
+        return_body(evidence),
+        format="json",
+    )
+    assert second.status_code == 400
+    assert (
+        PublicToolLoan.objects.get(pk=loan_b_id).status
+        == PublicToolLoan.Status.CHECKED_OUT
+    )
+
+
+@override_settings(API_CLIENT_AUTH_REQUIRED=False)
+def test_direct_return_rejects_evidence_used_by_reviewed_return(monkeypatch):
+    # Cross-workflow single-use: a RETURN photo already attached to a reviewed
+    # request's ReturnEvent cannot be reused for a direct-loan return.
+    from apps.hardware_requests.models import ReturnEvent
+
+    makerspace = make_space("direct-return-reviewed-reuse")
+    admin = make_admin(makerspace)
+    client, loan, _ = issue_direct_product_loan(makerspace, admin)
+    evidence = make_return_evidence(makerspace, admin)
+    box = Box.objects.create(makerspace=makerspace, label="Reviewed return box")
+    reviewed_request = HardwareRequest.objects.create(
+        makerspace=makerspace,
+        requester=admin,
+        requester_username=admin.username,
+        status=HardwareRequest.Status.RETURNED,
+        assigned_box=box,
+        issued_by=admin,
+    )
+    ReturnEvent.objects.create(
+        request=reviewed_request,
+        makerspace=makerspace,
+        box=box,
+        evidence=evidence,
+        remark="reviewed return",
+        actor=admin,
+    )
+    allow_uploaded(monkeypatch)
+
+    response = client.post(
+        f"/api/v1/admin/direct-loans/{loan.id}/return",
+        return_body(evidence),
+        format="json",
+    )
+
+    assert response.status_code == 400
     loan.refresh_from_db()
     assert loan.status == PublicToolLoan.Status.CHECKED_OUT

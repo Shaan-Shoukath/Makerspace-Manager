@@ -6,7 +6,11 @@ from apps.boxes.models import Box, BoxScan
 from apps.evidence import storage
 from apps.evidence.models import EvidencePhoto
 from apps.hardware_requests import notifications
-from apps.hardware_requests.models import HardwareRequest, ReturnEvent
+from apps.hardware_requests.models import (
+    HardwareRequest,
+    PublicToolLoan,
+    ReturnEvent,
+)
 from apps.hardware_requests.return_helpers import (
     build_resolutions,
     finalize_return_status,
@@ -32,6 +36,13 @@ def return_items(actor, request, evidence_id, remark, box_code, resolutions):
     with transaction.atomic():
         locked = locked_request(request)
         _require_returnable(locked)
+        # Lock the evidence row + reject a photo already consumed by a direct-loan
+        # return. ReturnEvent.evidence (OneToOne) already blocks reviewed-request
+        # reuse; this shared row lock serializes against the direct-loan return
+        # path, which has no DB constraint spanning the two tables.
+        EvidencePhoto.objects.select_for_update().get(pk=evidence.pk)
+        if PublicToolLoan.objects.filter(return_evidence=evidence).exists():
+            raise ReturnValidationError("Return evidence has already been used.")
         # Finalize evidence UNDER the request row lock so concurrent finalizers can't both
         # promote the staging upload over an already-finalized immutable key (Codex Stage-4
         # P2). PUT mode promotes staging->final + validates size; POST mode (MinIO) checks

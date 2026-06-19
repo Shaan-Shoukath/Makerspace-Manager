@@ -110,7 +110,14 @@ class DirectLoanReturnView(APIView):
         loan = get_object_or_404(queryset, pk=pk)
         require_module(loan.makerspace, "self_checkout")
         _require(request.user, rbac.Action.RETURN_REQUEST, loan.makerspace_id)
-        returned = direct_loan_workflow.return_direct_loan(loan, request.user)
+        serializer = DirectLoanReturnSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        returned = direct_loan_workflow.return_direct_loan(
+            loan,
+            request.user,
+            serializer.validated_data["evidence_id"],
+            serializer.validated_data["notes"],
+        )
         return Response(DirectLoanSerializer(returned).data)
 
 

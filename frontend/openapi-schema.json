@@ -962,7 +962,8 @@
                                 "$ref": "#/components/schemas/DirectLoanReturn"
                             }
                         }
-                    }
+                    },
+                    "required": true
                 },
                 "security": [
                     {
@@ -10692,6 +10693,15 @@
                         "readOnly": true,
                         "nullable": true
                     },
+                    "return_evidence_id": {
+                        "type": "integer",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "return_notes": {
+                        "type": "string",
+                        "readOnly": true
+                    },
                     "source": {
                         "type": "string",
                         "readOnly": true
@@ -10714,6 +10724,8 @@
                     "issued_by",
                     "items",
                     "public_token",
+                    "return_evidence_id",
+                    "return_notes",
                     "source",
                     "status",
                     "target_label",
@@ -10766,10 +10778,20 @@
             "DirectLoanReturn": {
                 "type": "object",
                 "properties": {
+                    "evidence_id": {
+                        "type": "integer"
+                    },
+                    "notes": {
+                        "type": "string"
+                    },
                     "returned_by_identifier": {
                         "type": "string"
                     }
-                }
+                },
+                "required": [
+                    "evidence_id",
+                    "notes"
+                ]
             },
             "DirectLoanUserAttribution": {
                 "type": "object",
@@ -11277,6 +11299,16 @@
                     "quantity": {
                         "type": "integer"
                     },
+                    "units": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/LedgerUnit"
+                        }
+                    },
+                    "target_label": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "since": {
                         "type": "string",
                         "format": "date-time",
@@ -11306,7 +11338,23 @@
                     "reference_id",
                     "since",
                     "source",
-                    "status"
+                    "status",
+                    "units"
+                ]
+            },
+            "LedgerUnit": {
+                "type": "object",
+                "properties": {
+                    "asset_tag": {
+                        "type": "string"
+                    },
+                    "serial_number": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "asset_tag",
+                    "serial_number"
                 ]
             },
             "LendingHistoryActor": {

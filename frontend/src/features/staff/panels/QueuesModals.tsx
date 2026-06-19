@@ -288,13 +288,18 @@ export function ReturnRequestModal({ row, open, pending, error, onClose, onSubmi
   const [remark, setRemark] = useState("");
   const [resolutions, setResolutions] = useState<ReturnRequestValues["resolutions"]>([]);
   const [validationError, setValidationError] = useState("");
+  const [issueUrl, setIssueUrl] = useState("");
 
   useEffect(() => {
-    if (!open || !row) return;
+    if (!open || !row) {
+      setIssueUrl("");
+      return;
+    }
     setEvidenceId(null);
     setBoxCode(row.assigned_box?.code ?? "");
     setRemark("");
     setValidationError("");
+    setIssueUrl("");
     setResolutions(row.items.map((item) => ({
       item_id: item.id,
       returned: item.issued_quantity - item.returned_quantity - item.damaged_quantity - item.missing_quantity,
@@ -302,6 +307,26 @@ export function ReturnRequestModal({ row, open, pending, error, onClose, onSubmi
       missing: 0,
     })));
   }, [open, row]);
+
+  useEffect(() => {
+    if (!open || !row?.issue_evidence_id) {
+      setIssueUrl("");
+      return;
+    }
+
+    let cancelled = false;
+    staffRequest<{ url: string }>(`/admin/evidence/${row.issue_evidence_id}`)
+      .then((result) => {
+        if (!cancelled) setIssueUrl(result.url);
+      })
+      .catch(() => {
+        if (!cancelled) setIssueUrl("");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, row?.issue_evidence_id]);
 
   const updateResolution = (itemId: number, key: "returned" | "damaged" | "missing", value: string) => {
     setResolutions((current) => current.map((resolution) => (resolution.item_id === itemId ? { ...resolution, [key]: Number(value) || 0 } : resolution)));
@@ -335,6 +360,16 @@ export function ReturnRequestModal({ row, open, pending, error, onClose, onSubmi
         }
       >
         <div className="grid gap-3 sm:grid-cols-2">
+          {issueUrl ? (
+            <div className="grid gap-1 text-sm">
+              <span className="font-medium text-ink">Issue photo (for comparison)</span>
+              <img
+                src={issueUrl}
+                alt="Issue photo for comparison"
+                className="max-h-56 w-full rounded-md border border-line object-contain"
+              />
+            </div>
+          ) : null}
           <div className="grid gap-1 text-sm">
             <span className="font-medium text-ink">Return photo</span>
             <EvidenceUpload makerspaceId={makerspaceId} evidenceType="return" disabled={pending} onUploaded={setEvidenceId} />

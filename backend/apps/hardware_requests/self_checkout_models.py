@@ -63,6 +63,18 @@ class PublicToolLoan(models.Model):
     checked_out_at = models.DateTimeField(auto_now_add=True)
     due_at = models.DateTimeField(null=True, blank=True)
     returned_at = models.DateTimeField(null=True, blank=True)
+    # OneToOne (not FK): one return photo per handover — a given evidence row can
+    # back at most one direct-loan return, mirroring ReturnEvent.evidence's
+    # single-use guarantee for reviewed requests (NULLs are exempt in Postgres, so
+    # all un-returned loans coexist). See return_direct_loan for the clean 400.
+    return_evidence = models.OneToOneField(
+        "evidence.EvidencePhoto",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    return_notes = models.TextField(blank=True, default="")
 
     class Meta:
         constraints = [

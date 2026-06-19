@@ -1,10 +1,12 @@
 from datetime import datetime, timezone
 
-from django.db.models import F
+from django.db.models import F, Prefetch
 
 from apps.accounts import rbac
+from apps.hardware_requests.asset_link_models import HardwareRequestItemAsset
 from apps.hardware_requests.models import HardwareRequest, HardwareRequestItem
 from apps.hardware_requests.self_checkout_models import PublicToolLoan
+from apps.inventory.models import InventoryAsset
 
 
 def ledger_rows(makerspace_id=None):
@@ -42,6 +44,14 @@ def _request_item_rows(makerspace_id):
             )
         )
         .filter(outstanding__gt=0)
+        .prefetch_related(
+            Prefetch(
+                "asset_links",
+                queryset=HardwareRequestItemAsset.objects.filter(
+                    outcome=HardwareRequestItemAsset.Outcome.ISSUED
+                ).select_related("asset"),
+            )
+        )
     )
     if makerspace_id is not None:
         queryset = queryset.filter(request__makerspace_id=makerspace_id)
@@ -53,15 +63,22 @@ def _request_item_rows(makerspace_id):
         if excluded:
             queryset = queryset.exclude(request__makerspace_id__in=excluded)
 
+    item_loans = [
+        (item, _safe_loan(item.request))
+        for item in queryset.order_by("-request__issued_at", "request_id", "id")
+    ]
+    asset_map = _loan_asset_map(item_loans)
+
     rows = []
-    for item in queryset.order_by("-request__issued_at", "request_id", "id"):
-        loan = _safe_loan(item.request)
+    for item, loan in item_loans:
         rows.append(
             {
                 "source": _source(loan),
                 "item_name": item.product.name,
                 "holder": _request_holder(item.request),
                 "quantity": item.outstanding,
+                "units": _units_for_item(item, loan, asset_map),
+                "target_label": loan.target_label if loan else None,
                 "since": item.request.issued_at,
                 "due": (loan.due_at if loan else None) or item.request.return_due_at,
                 "makerspace_id": item.request.makerspace_id,
@@ -70,6 +87,63 @@ def _request_item_rows(makerspace_id):
             }
         )
     return rows
+
+
+def _loan_asset_map(item_loans):
+    asset_ids = set()
+    makerspace_ids = set()
+    for item, loan in item_loans:
+        makerspace_ids.add(item.request.makerspace_id)
+        if loan is not None:
+            asset_ids.update(loan.asset_ids or [])
+    if not asset_ids:
+        return {}
+    return {
+        asset_id: {
+            "asset_tag": asset_tag,
+            "serial_number": serial_number,
+            "product_id": product_id,
+            "makerspace_id": makerspace_id,
+        }
+        for asset_id, asset_tag, serial_number, product_id, makerspace_id in (
+            InventoryAsset.objects.filter(
+                pk__in=asset_ids,
+                makerspace_id__in=makerspace_ids,
+            ).values_list(
+                "id",
+                "asset_tag",
+                "serial_number",
+                "product_id",
+                "makerspace_id",
+            )
+        )
+    }
+
+
+def _units_for_item(item, loan, asset_map):
+    if loan is not None:
+        return [
+            {
+                "asset_tag": asset["asset_tag"],
+                "serial_number": asset["serial_number"],
+            }
+            for asset_id in loan.asset_ids or []
+            if (asset := asset_map.get(asset_id))
+            and asset["product_id"] == item.product_id
+            and asset["makerspace_id"] == item.request.makerspace_id
+        ]
+
+    units = []
+    for link in item.asset_links.all():
+        asset = link.asset
+        # asset_links are request-scoped, so this should always hold; skip (never
+        # assert) a stray cross-makerspace asset rather than 500 the ledger.
+        if asset.makerspace_id != item.request.makerspace_id:
+            continue
+        units.append(
+            {"asset_tag": asset.asset_tag, "serial_number": asset.serial_number}
+        )
+    return units
 
 
 def _safe_loan(request):

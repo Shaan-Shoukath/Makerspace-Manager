@@ -2,6 +2,43 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Recent batch — ledger specific-unit + staff-return evidence (2026-06-20)
+
+Three staff-console features (Codex Stage-1 plan-reviewed APPROVED; Stage-4 review clean after 4
+successive concurrency P2 fixes; full suite 634 green). **Self-checkout is untouched** (stays public
+self-serve, no photos). One migration (`hardware_requests/0016`). Plan:
+`docs/superpowers/specs/2026-06-19-ledger-units-and-staff-return-evidence-plan.md`.
+
+- **Ledger now shows the specific physical unit taken.** `operations.ledger._request_item_rows`
+  adds `units` (`[{asset_tag, serial_number}]`) + `target_label` per row. Loan-backed rows
+  (self-checkout/direct handout) resolve units from `PublicToolLoan.asset_ids` filtered to the row's
+  product; reviewed-request rows from the item's `HardwareRequestItemAsset` links with
+  `outcome=ISSUED`; quantity-tracked items → `units: []`. **No N+1:** one makerspace-scoped
+  `InventoryAsset` batch query (map `{id:(tag,serial,product_id,makerspace_id)}`) + an `asset_links`
+  prefetch; units only attach when **both** `product_id` and `makerspace_id` match (defends a
+  stale/corrupt `asset_ids`). `LedgerUnitSerializer` + `units`/`target_label` added to
+  `LedgerRowSerializer`; `{count, results}` shape preserved. Frontend `Ledger.tsx` renders serial(s)/
+  label under the item name.
+- **Direct-handout return now requires a photo + notes** (giving stays photo-free).
+  `PublicToolLoan` gains `return_evidence` (**OneToOne** → `EvidencePhoto`, SET_NULL) + `return_notes`.
+  `direct_loan_workflow.return_direct_loan(loan, actor, evidence_id, notes)` validates notes
+  non-blank, resolves a same-makerspace RETURN `EvidencePhoto`, and under the loan row lock:
+  **locks the evidence row FIRST** (before finalizing the PUT upload), rejects reuse (the photo
+  already backing another `PublicToolLoan.return_evidence` **or** a reviewed-request
+  `ReturnEvent.evidence` → "Evidence already used."), finalizes the upload
+  (`storage.finalize_upload`/`object_exists`, mirroring `return_workflow`; `StorageUnavailable`
+  propagates → 503), stores both, audits `evidence.attached`. The shared `EvidencePhoto`
+  `select_for_update` lock — now taken in **both** return paths (direct-loan + `return_workflow`,
+  which gained the symmetric `PublicToolLoan` cross-check) — serializes the two flows since no single
+  DB constraint spans the two tables. `DirectLoanReturnSerializer` gains `evidence_id` + `notes`;
+  `DirectLoanSerializer` exposes `return_evidence_id`/`return_notes`. Frontend: `DirectLoans.tsx`
+  Return button → `DirectLoanReturnModal` (EvidenceUpload return + notes); returned loans get a
+  "View return photo" button (`DirectLoanList.tsx`). The `return_notes`/evidence are staff-only
+  (direct-loan serializer is never public).
+- **Reviewed-request return shows the issue photo for comparison** (frontend only). `ReturnRequestModal`
+  fetches the existing `issue_evidence_id` signed URL (`/admin/evidence/<id>`) and renders it inline
+  beside the return-photo upload (cancellation-safe effect).
+
 ## Recent batch - lean-paid production deploy + perf hardening (2026-06-19)
 
 Added production deployment artifacts for the recommended always-on single-makerspace path:

@@ -3,18 +3,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import QrScanner from "../../components/ui/QrScanner";
 import { staffRequest } from "../../lib/api";
+import { DirectLoanList, type DirectLoan } from "./DirectLoanList";
+import { DirectLoanReturnModal } from "./DirectLoanReturnModal";
 import { Panel, type Makerspace, useStaffGet } from "./StaffPanels";
-
-type DirectLoan = {
-  id: number;
-  public_token: string;
-  status: string;
-  target_label: string;
-  container_label?: string | null;
-  due_at: string | null;
-  issued_by: { username: string; role: string } | null;
-  items: { product_name: string; quantity: number }[];
-};
 
 type ProductOption = {
   id: number;
@@ -30,6 +21,7 @@ type ContainerResponse = ContainerOption[] | { results: ContainerOption[] };
 type VerifyResponse = { username: string };
 type LineDraft = { key: number; productId: string; quantity: string };
 type ScannedPayload = { payload: string; label: string };
+type ReturnLoanPayload = { loanId: number; evidenceId: number; notes: string };
 type QrResolveResponse = {
   target:
     | { type: "product"; id: number; name: string }
@@ -50,6 +42,9 @@ export function DirectLoans({ makerspace }: { makerspace: Makerspace }) {
   // mid-flight must never approve a stale, mismatched identity.
   const [verifiedIdentifier, setVerifiedIdentifier] = useState("");
   const [verifiedUsername, setVerifiedUsername] = useState("");
+  const [returningLoan, setReturningLoan] = useState<DirectLoan | null>(null);
+  const [returnEvidenceId, setReturnEvidenceId] = useState<number | null>(null);
+  const [returnNotes, setReturnNotes] = useState("");
   useEffect(() => {
     setIdentifier("");
     setLineRows([{ key: 1, productId: "", quantity: "1" }]);
@@ -60,6 +55,9 @@ export function DirectLoans({ makerspace }: { makerspace: Makerspace }) {
     setContainerId("");
     setVerifiedIdentifier("");
     setVerifiedUsername("");
+    setReturningLoan(null);
+    setReturnEvidenceId(null);
+    setReturnNotes("");
   }, [makerspace.id]);
   const products = useStaffGet<{ results: ProductOption[] }>(
     ["inventory-all", makerspace.id],
@@ -128,13 +126,42 @@ export function DirectLoans({ makerspace }: { makerspace: Makerspace }) {
     },
   });
   const returnLoan = useMutation({
-    mutationFn: (loanId: number) =>
+    mutationFn: ({ loanId, evidenceId, notes }: ReturnLoanPayload) =>
       staffRequest(`/admin/direct-loans/${loanId}/return`, {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({ evidence_id: evidenceId, notes }),
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["direct-loans", makerspace.id] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["direct-loans", makerspace.id] });
+      queryClient.invalidateQueries({ queryKey: ["ledger", makerspace.id] });
+      queryClient.invalidateQueries({ queryKey: ["ledger", "all"] });
+      resetReturnState();
+    },
   });
+  const resetReturnState = () => {
+    setReturningLoan(null);
+    setReturnEvidenceId(null);
+    setReturnNotes("");
+  };
+  const openReturnModal = (loan: DirectLoan) => {
+    returnLoan.reset();
+    setReturningLoan(loan);
+    setReturnEvidenceId(null);
+    setReturnNotes("");
+  };
+  const closeReturnModal = () => {
+    if (returnLoan.isPending) return;
+    returnLoan.reset();
+    resetReturnState();
+  };
+  const submitReturn = () => {
+    if (!returningLoan || returnEvidenceId === null || !returnNotes.trim()) return;
+    returnLoan.mutate({
+      loanId: returningLoan.id,
+      evidenceId: returnEvidenceId,
+      notes: returnNotes.trim(),
+    });
+  };
   const addLine = () => {
     setLineRows((rows) => [...rows, { key: nextLineKey, productId: "", quantity: "1" }]);
     setNextLineKey((key) => key + 1);
@@ -250,33 +277,19 @@ export function DirectLoans({ makerspace }: { makerspace: Makerspace }) {
         {containers.error ? <p className="mt-3 text-sm text-danger">{containers.error.message}</p> : null}
         {showScanner ? <QrScanner onScan={handleScan} onClose={() => setShowScanner(false)} /> : null}
       </Panel>
-      <Panel title="Direct handout loans">
-        <div className="grid gap-2">
-          {loans.data?.results?.map((loan) => (
-            <article key={loan.id} className="rounded-md border border-line bg-surface p-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="font-semibold text-ink">{loan.target_label}</h3>
-                  <p className="text-xs text-muted">
-                    {loan.status}
-                    {loan.container_label ? ` - given in: ${loan.container_label}` : ""}
-                    {loan.due_at ? ` - due ${new Date(loan.due_at).toLocaleString()}` : ""}
-                    {loan.issued_by ? ` - Issued by ${loan.issued_by.username}` : ""}
-                  </p>
-                </div>
-                {loan.status === "checked_out" ? (
-                  <button className="desk-button" onClick={() => returnLoan.mutate(loan.id)}>
-                    Return
-                  </button>
-                ) : null}
-              </div>
-              <p className="mt-2 text-xs text-muted">
-                {loan.items.map((item) => `${item.product_name} x${item.quantity}`).join(", ")}
-              </p>
-            </article>
-          ))}
-        </div>
-      </Panel>
+      <DirectLoanList loans={loans.data?.results ?? []} onReturn={openReturnModal} />
+      <DirectLoanReturnModal
+        loan={returningLoan}
+        makerspaceId={makerspace.id}
+        evidenceId={returnEvidenceId}
+        notes={returnNotes}
+        pending={returnLoan.isPending}
+        error={returnLoan.error?.message ?? ""}
+        onEvidenceUploaded={setReturnEvidenceId}
+        onNotesChange={setReturnNotes}
+        onCancel={closeReturnModal}
+        onSubmit={submitReturn}
+      />
     </div>
   );
 }

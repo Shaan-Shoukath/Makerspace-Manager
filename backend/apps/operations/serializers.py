@@ -78,11 +78,22 @@ class ReportRowsSerializer(serializers.Serializer):
     rows = serializers.ListField(child=serializers.ListField(child=serializers.CharField(allow_blank=True, allow_null=True)))
 
 
+class LedgerUnitSerializer(serializers.Serializer):
+    asset_tag = serializers.CharField()
+    serial_number = serializers.CharField(allow_blank=True)
+
+
 class LedgerRowSerializer(serializers.Serializer):
     source = serializers.ChoiceField(choices=["request", "self_checkout", "direct_handout"])
     item_name = serializers.CharField()
     holder = serializers.CharField(allow_blank=True)
     quantity = serializers.IntegerField()
+    units = LedgerUnitSerializer(many=True)
+    target_label = serializers.CharField(
+        allow_blank=True,
+        allow_null=True,
+        required=False,
+    )
     since = serializers.DateTimeField(allow_null=True)
     due = serializers.DateTimeField(allow_null=True)
     makerspace_id = serializers.IntegerField()
