@@ -117,6 +117,31 @@ def test_send_return_reminders_emails_only_overdue_active_unreminded_requests(ma
     assert len(mailoutbox) == 1
 
 
+def test_send_return_reminders_still_emails_superadmin_hidden_active_space(mailoutbox):
+    # A superadmin-hidden space (superadmin_access_enabled=False) is still fully
+    # operational for its own staff/borrowers; only the global superadmin's view is
+    # blocked. Overdue loans there must still trigger borrower-facing reminders.
+    now = timezone.now()
+    hidden_space = make_space("hidden-return-reminders")
+    hidden_space.superadmin_access_enabled = False
+    hidden_space.save(update_fields=["superadmin_access_enabled"])
+    product = make_product(hidden_space)
+    overdue = make_request(
+        hidden_space,
+        product,
+        status=HardwareRequest.Status.ISSUED,
+        contact_email="hidden-overdue@example.com",
+        due_at=now - timedelta(minutes=5),
+    )
+
+    result = run_return_reminders(now=now)
+
+    assert result["sent"] == 1
+    assert [message.to for message in mailoutbox] == [["hidden-overdue@example.com"]]
+    overdue.refresh_from_db()
+    assert overdue.return_reminder_sent_at is not None
+
+
 def test_run_return_reminders_does_not_send_when_request_already_claimed(monkeypatch):
     now = timezone.now()
     makerspace = make_space("return-reminder-claimed")

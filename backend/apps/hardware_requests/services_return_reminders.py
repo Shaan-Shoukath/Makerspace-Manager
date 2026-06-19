@@ -9,9 +9,11 @@ from apps.hardware_requests.models import HardwareRequest
 def run_return_reminders(*, now=None, limit=200) -> dict:
     now = now or timezone.now()
     limit = max(int(limit), 1)
-    excluded_makerspace_ids = (
-        rbac.archived_makerspace_ids() | rbac.superadmin_hidden_makerspace_ids()
-    )
+    # Exclude only ARCHIVED (soft-deleted) makerspaces. A superadmin-hidden space
+    # (superadmin_access_enabled=False) is still fully operational for its own staff
+    # and borrowers — only the global superadmin's view is blocked — so its overdue
+    # loans must still trigger borrower-facing return reminders.
+    excluded_makerspace_ids = rbac.archived_makerspace_ids()
     queryset = (
         HardwareRequest.objects.select_related("makerspace", "requester")
         .filter(
