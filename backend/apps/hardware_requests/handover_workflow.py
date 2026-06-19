@@ -96,19 +96,6 @@ def issue_request(actor, request, evidence_id, remark="", asset_qr_payloads=None
     ).first()
     if evidence is None:
         raise RequestValidationError("Invalid issue evidence.")
-    # PUT mode (Supabase/R2): promote the staging upload to the immutable final key
-    # and validate its size (PUT has no upload-time content-length-range). POST mode
-    # (MinIO) is unchanged — existence only; its presign policy already bounded size.
-    if settings.STORAGE_PRESIGN_METHOD == "put":
-        size = storage.finalize_upload(evidence.object_key, settings.EVIDENCE_MAX_BYTES)
-        if size is None:
-            raise EvidenceNotUploaded("Issue evidence has not been uploaded.")
-        if not (1 <= size <= settings.EVIDENCE_MAX_BYTES):
-            raise RequestValidationError(
-                "Issue evidence is invalid or exceeds the size limit."
-            )
-    elif not storage.object_exists(evidence.object_key):
-        raise EvidenceNotUploaded("Issue evidence has not been uploaded.")
 
     with transaction.atomic():
         locked = locked_request(request)
@@ -116,6 +103,22 @@ def issue_request(actor, request, evidence_id, remark="", asset_qr_payloads=None
             raise InvalidTransition(
                 f"Cannot issue hardware request with status {locked.status}."
             )
+        # Finalize evidence UNDER the request row lock + AFTER the status guard, so two
+        # concurrent issues can't both promote the staging upload to the immutable final
+        # key (the loser fails the status check before reaching here) — closes the
+        # concurrent-finalizer overwrite race (Codex Stage-4 P2). PUT mode (Supabase/R2)
+        # promotes staging->final + validates size; POST mode (MinIO) checks existence
+        # only (its presign policy already bounded size).
+        if settings.STORAGE_PRESIGN_METHOD == "put":
+            size = storage.finalize_upload(evidence.object_key, settings.EVIDENCE_MAX_BYTES)
+            if size is None:
+                raise EvidenceNotUploaded("Issue evidence has not been uploaded.")
+            if not (1 <= size <= settings.EVIDENCE_MAX_BYTES):
+                raise RequestValidationError(
+                    "Issue evidence is invalid or exceeds the size limit."
+                )
+        elif not storage.object_exists(evidence.object_key):
+            raise EvidenceNotUploaded("Issue evidence has not been uploaded.")
         if not locked.assigned_box_id or not BoxScan.objects.filter(
             request=locked,
             box_id=locked.assigned_box_id,
