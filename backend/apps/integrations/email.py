@@ -62,6 +62,26 @@ def platform_email_configured() -> bool:
     return bool((cfg.smtp_host or "").strip())
 
 
+def _is_smtp_backend() -> bool:
+    return settings.EMAIL_BACKEND.endswith("smtp.EmailBackend")
+
+
+def email_enabled() -> bool:
+    # Instance-wide: can we actually deliver mail?
+    if platform_email_configured():
+        return True
+    if _is_smtp_backend() and (settings.EMAIL_HOST or "").strip():
+        return True
+    # Console/locmem are dev conveniences. In production they should report
+    # disabled so the UI points operators at admin-side password recovery.
+    if settings.DEBUG and (
+        settings.EMAIL_BACKEND.endswith("console.EmailBackend")
+        or settings.EMAIL_BACKEND.endswith("locmem.EmailBackend")
+    ):
+        return True
+    return False
+
+
 def send_password_reset_email(recipient, reset_url):
     connection, from_email = platform_mail_connection()
     subject = "Reset your password"
