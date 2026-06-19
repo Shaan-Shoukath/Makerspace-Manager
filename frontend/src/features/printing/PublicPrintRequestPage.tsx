@@ -59,7 +59,10 @@ export function PublicPrintRequestPage() {
   const statusQuery = useQuery({
     queryKey: ["public-print-status", activeStatusToken],
     queryFn: () => fetchPrintStatus(activeStatusToken),
-    enabled: Boolean(activeStatusToken) && enabled,
+    // Not gated on the printing module: the backend token-status endpoint stays
+    // available, so a requester opening an existing ?token= link must still see
+    // their status even if the makerspace later disables new submissions.
+    enabled: Boolean(activeStatusToken),
     refetchInterval: (query) =>
       query.state.data?.status === "printing" ? 30_000 : false,
   });
@@ -206,6 +209,18 @@ export function PublicPrintRequestPage() {
             <h2 className="mt-2 text-xl font-semibold text-ink">
               3D printing is not enabled for this makerspace.
             </h2>
+            {/* New submissions are blocked when the module is off, but an existing
+                requester following a ?token= status link must still see their print
+                status (the backend token-status endpoint is not module-gated). */}
+            {activeStatusToken ? (
+              <div className="mt-4">
+                <StatusResult
+                  error={statusQuery.error}
+                  isPending={statusQuery.isPending}
+                  status={statusQuery.data}
+                />
+              </div>
+            ) : null}
             <Link className="desk-button mt-4" to={tenantPath()}>
               Back to inventory
             </Link>
