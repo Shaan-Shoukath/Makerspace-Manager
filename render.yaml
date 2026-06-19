@@ -93,8 +93,12 @@ services:
     buildCommand: cd frontend && npm ci && npm run build
     staticPublishPath: ./frontend/dist
     envVars:
+      # sync:false so Render PROMPTS for the real backend API root at deploy time.
+      # VITE_API_URL is a BUILD-TIME var baked into the static bundle by Vite — a
+      # concrete placeholder here would ship an invalid URL until someone edits it
+      # and rebuilds (Codex Stage-4 P2). Set it to https://<backend-host>/api .
       - key: VITE_API_URL
-        value: https://<render-backend-host>.onrender.com/api
+        sync: false
       - key: VITE_TENANT_TOKEN
         sync: false
       - key: VITE_PUBLIC_API_KEY

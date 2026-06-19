@@ -67,19 +67,19 @@ def _is_smtp_backend() -> bool:
 
 
 def email_enabled() -> bool:
-    # Instance-wide: can we actually deliver mail?
-    if platform_email_configured():
-        return True
-    if _is_smtp_backend() and (settings.EMAIL_HOST or "").strip():
-        return True
-    # Console/locmem are dev conveniences. In production they should report
-    # disabled so the UI points operators at admin-side password recovery.
-    if settings.DEBUG and (
+    # Can we actually DELIVER mail? platform_mail_connection()/makerspace_mail_connection()
+    # build the connection via Django get_connection(), which uses settings.EMAIL_BACKEND as
+    # the backend CLASS. So a configured SMTP *host* (platform DB row or env EMAIL_HOST) only
+    # delivers when EMAIL_BACKEND is the SMTP backend — with the console/locmem backend the
+    # host args are ignored and mail is merely logged. Reporting enabled in that case would
+    # advertise a Forgot-Password path that silently never sends (Codex Stage-4 P2).
+    if _is_smtp_backend():
+        return platform_email_configured() or bool((settings.EMAIL_HOST or "").strip())
+    # Non-SMTP backend (console/locmem): a dev convenience only, and only under DEBUG.
+    return settings.DEBUG and (
         settings.EMAIL_BACKEND.endswith("console.EmailBackend")
         or settings.EMAIL_BACKEND.endswith("locmem.EmailBackend")
-    ):
-        return True
-    return False
+    )
 
 
 def send_password_reset_email(recipient, reset_url):
