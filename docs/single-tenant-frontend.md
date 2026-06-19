@@ -29,11 +29,14 @@ The production frontend container writes `/config.js` at startup from:
 - `TENANT_API_URL` - backend API base, for example `https://host.example/api`
 - `TENANT_TOKEN` - `TenantFrontend.token` or makerspace `public_code`
 
+If those are unset, the same startup script falls back to `VITE_API_URL` and
+`VITE_TENANT_TOKEN`.
+
 Startup validation rejects unsafe runtime config before writing `/config.js`.
-`TENANT_API_URL` must be a relative `/api` path or an `http(s)` URL.
-`TENANT_TOKEN` may only contain letters, numbers, dot, underscore, colon, and
-dash, up to 256 characters. Control characters, quotes, backslashes, backticks,
-and angle brackets are rejected.
+`TENANT_API_URL` uses a loose prefix check: values starting with `/`, `http://`,
+or `https://` are accepted. `TENANT_TOKEN` may only contain letters, numbers,
+dot, underscore, colon, and dash, up to 256 characters. Control characters,
+quotes, backslashes, backticks, and angle brackets are rejected.
 
 `/config.js` is served with `Cache-Control: no-store`, so changing those env vars
 and restarting the container re-points the site without rebuilding the bundle.
@@ -56,10 +59,15 @@ single-tenant mode. This creates one active `TenantFrontend`:
 - `hostname`: the site's hostname, for example `shaan.example`
 - `token`: the token handed to the site operator
 
-Also add the site origin, for example `https://shaan.example`, to
-`makerspace.cors_allowed_origins`. `TenantFrontend` allows general CORS and the
-staff refresh/logout CSRF flow; `cors_allowed_origins` lets the publishable-key
-public API calls validate.
+Also register the site origin, for example `https://shaan.example`, on an active
+makerspace API client. Create or update that client from the staff console's API
+tab, or from `/control/` under API clients, with the site origin in
+`allowed_origins`. Saving the client syncs `makerspace.cors_allowed_origins`
+from the `allowed_origins` of all active API clients for that makerspace. The
+staff integration API exposes `cors_allowed_origins` as read-only, and the
+`/control/` Makerspace admin does not expose it for direct editing.
+`TenantFrontend` allows general CORS and the staff refresh/logout CSRF flow;
+`cors_allowed_origins` lets the publishable-key public API calls validate.
 
 Staff refresh/logout rejects non-localhost `http://` origins. Use HTTPS for
 hosted staff dashboards; local development may keep `http://localhost`.
@@ -74,6 +82,11 @@ Central mode remains unchanged:
 - `/m/:slug/print` - public print requests
 - `/m/:slug/checkout` - public self-checkout
 - `/admin` - shared staff console with makerspace switching
+- `/guest-admin` - guest handover console with makerspace switching
+- `/scanner` - shared staff scanner
+- `/superadmin` - platform superadmin console
+- `/kiosk/:slug` - public kiosk view
+- `/reset-password` - staff password reset
 
 Single-tenant mode uses clean root routes:
 
@@ -83,6 +96,8 @@ Single-tenant mode uses clean root routes:
 - `/checkout` - public self-checkout
 - `/admin` - staff console locked to the configured makerspace
 - `/guest-admin` - guest handover console locked to the configured makerspace
+- `/scanner` - staff scanner locked to the configured makerspace
+- `/reset-password` - staff password reset
 
 The single-tenant lock is UI-only. Backend authorization remains membership based:
 a user can only act on makerspaces allowed by their `MakerspaceMembership`.

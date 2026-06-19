@@ -70,7 +70,7 @@ export function PlatformEmailPanel() {
   return (
     <Panel title="Platform email">
       <p className="text-sm text-muted">
-        Instance-wide SMTP used ONLY for account emails (password resets). Separate from each makerspace's notification SMTP.
+        Instance-wide SMTP for password resets and makerspace notifications when a makerspace has no SMTP configured.
       </p>
 
       <div className="mt-4 rounded-md border border-line bg-surface p-3">

@@ -3,6 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from apps.integrations.email import makerspace_mail_connection
+from apps.integrations.models import PlatformEmailSettings
 from apps.makerspaces.models import Makerspace
 
 pytestmark = pytest.mark.django_db
@@ -46,7 +47,29 @@ def test_starttls_used_when_ssl_off():
     assert kwargs["use_tls"] is True
 
 
-def test_no_smtp_host_returns_no_connection():
+def test_no_smtp_host_uses_default_connection_when_platform_email_unconfigured():
     space = Makerspace.objects.create(name="smtp-none", slug="smtp-none")
     connection, from_email = makerspace_mail_connection(space)
     assert connection is None
+
+
+def test_no_smtp_host_falls_back_to_platform_email():
+    cfg = PlatformEmailSettings.load()
+    cfg.smtp_host = "platform-smtp.example.com"
+    cfg.smtp_port = 2525
+    cfg.smtp_username = "platform-user"
+    cfg.set_smtp_password("platform-secret")
+    cfg.smtp_use_tls = True
+    cfg.smtp_use_ssl = False
+    cfg.from_email = "platform@example.com"
+    cfg.save()
+    space = Makerspace.objects.create(name="smtp-platform", slug="smtp-platform")
+
+    with patch("apps.integrations.email.get_connection") as get_connection:
+        connection, from_email = makerspace_mail_connection(space)
+
+    assert connection == get_connection.return_value
+    assert from_email == "platform@example.com"
+    assert get_connection.call_args.kwargs["host"] == "platform-smtp.example.com"
+    assert get_connection.call_args.kwargs["username"] == "platform-user"
+    assert get_connection.call_args.kwargs["password"] == "platform-secret"

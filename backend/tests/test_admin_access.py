@@ -1,10 +1,17 @@
+from decimal import Decimal
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
+from django.urls import reverse
 from rest_framework.test import APIClient
 
 from apps.accounts.models import User
+from apps.audit.models import AuditLog
+from apps.makerspaces import lifecycle
 from apps.makerspaces.models import Makerspace, MakerspaceMembership
+from apps.operations.models import StockTransfer
+from apps.printing.models import FilamentSpool, PrintPrinter
 
 pytestmark = pytest.mark.django_db
 
@@ -88,3 +95,55 @@ def test_non_admin_docs_root_csp_does_not_allow_unsafe_eval():
     assert response.status_code == 200
     csp = response["Content-Security-Policy"]
     assert "'unsafe-eval'" not in csp
+
+
+@pytest.mark.django_db(transaction=True)
+def test_superadmin_can_delete_archived_makerspace_from_django_admin(monkeypatch):
+    superadmin = make_user(
+        "admin-delete-archived-superadmin",
+        role=User.Role.SUPERADMIN,
+        is_staff=True,
+        is_superuser=True,
+    )
+    makerspace = Makerspace.objects.create(
+        name="Admin Delete Archived",
+        slug="admin-delete-archived",
+    )
+    StockTransfer.objects.create(
+        makerspace=makerspace,
+        created_by=superadmin,
+        reason="Admin delete regression",
+    )
+    AuditLog.objects.create(
+        actor=superadmin,
+        action="admin.delete_regression",
+        makerspace=makerspace,
+    )
+    printer = PrintPrinter.objects.create(
+        makerspace=makerspace,
+        name="Admin Delete Printer",
+    )
+    FilamentSpool.objects.create(
+        makerspace=makerspace,
+        printer=printer,
+        material="PLA",
+        color="black",
+        initial_weight_grams=Decimal("1000.00"),
+        remaining_weight_grams=Decimal("900.00"),
+    )
+    archived = lifecycle.archive(makerspace, superadmin)
+    monkeypatch.setattr(lifecycle, "_delete_storage_keys", lambda keys: None)
+
+    client = Client()
+    client.force_login(superadmin)
+    url = reverse("admin:makerspaces_makerspace_delete", args=[archived.pk])
+
+    confirm = client.get(url)
+
+    assert confirm.status_code == 200
+    assert "doesn&#x27;t have permission" not in confirm.content.decode()
+
+    deleted = client.post(url, {"post": "yes"})
+
+    assert deleted.status_code == 302
+    assert not Makerspace.objects.filter(pk=archived.pk).exists()

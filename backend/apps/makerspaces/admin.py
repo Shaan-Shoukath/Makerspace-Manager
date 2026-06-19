@@ -89,7 +89,30 @@ class MakerspaceAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
         return super().get_inline_instances(request, obj)
 
     def has_delete_permission(self, request, obj=None):
-        return False
+        # The normal admin delete button is a permanent purge entry point. Keep it
+        # object-scoped so the default bulk delete action stays disabled; bulk
+        # purges must use the slug-confirming `purge_makerspaces` action below.
+        if obj is None:
+            return False
+        return super().has_delete_permission(request, obj) and obj.archived_at is not None
+
+    def get_deleted_objects(self, objs, request):
+        # Django's stock collector asks every related ModelAdmin whether it can
+        # delete each related object. Several of those admins intentionally
+        # disable ordinary deletes to preserve history, which blocks a whole-space
+        # purge even though lifecycle.purge() deletes the complete graph safely.
+        objs = list(objs)
+        return (
+            [f"{self.opts.verbose_name}: {obj}" for obj in objs],
+            {self.opts.verbose_name_plural: len(objs)},
+            set(),
+            [],
+        )
+
+    def delete_model(self, request, obj):
+        from apps.makerspaces import lifecycle
+
+        lifecycle.purge(obj, request.user)
 
     @admin.display(boolean=True, description="Archived")
     def archived(self, obj):
@@ -102,6 +125,7 @@ class MakerspaceAdmin(SuperuserOnlyModelAdmin, ModelAdmin):
             is_active=True,
         ).exists()
         return "single-tenant" if has_staff_site else "central"
+
     @admin.action(description="Archive selected makerspaces")
     def archive_makerspaces(self, request, queryset):
         from apps.makerspaces import lifecycle

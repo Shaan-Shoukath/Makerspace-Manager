@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 def makerspace_mail_connection(makerspace):
     if not makerspace.smtp_host:
-        return None, settings.DEFAULT_FROM_EMAIL
+        return platform_mail_connection()
     # use_ssl (implicit SSL, port 465) and use_tls (STARTTLS, port 587) are
     # mutually exclusive in Django's SMTP backend — prefer SSL when both are set.
     use_ssl = makerspace.smtp_use_ssl
