@@ -55,7 +55,7 @@ def _summary(makerspace_id):
     assets = _assets(makerspace_id)
     requests = _requests(makerspace_id)
     return {
-        "products": products.filter(is_archived=False).count(),
+        "products": products.count(),
         "assets": assets.count(),
         "active_loans": requests.filter(
             status__in=[
@@ -193,7 +193,7 @@ def _product_quantity_rows(makerspace_id, aggregate, values, header):
 
 
 def _products(makerspace_id):
-    qs = InventoryProduct.objects.all()
+    qs = InventoryProduct.objects.filter(is_archived=False)
     if makerspace_id is None:
         excluded = (
             rbac.superadmin_hidden_makerspace_ids()
@@ -204,7 +204,9 @@ def _products(makerspace_id):
 
 
 def _assets(makerspace_id):
-    qs = InventoryAsset.objects.all()
+    # Exclude assets of archived products so the summary's asset total stays
+    # consistent with the archived-excluded product/quantity figures.
+    qs = InventoryAsset.objects.exclude(product__is_archived=True)
     if makerspace_id is None:
         excluded = (
             rbac.superadmin_hidden_makerspace_ids()
@@ -215,7 +217,7 @@ def _assets(makerspace_id):
 
 
 def _items(makerspace_id):
-    qs = HardwareRequestItem.objects.select_related("request", "product")
+    qs = HardwareRequestItem.objects.select_related("request", "product").filter(product__is_archived=False)
     if makerspace_id is None:
         excluded = (
             rbac.superadmin_hidden_makerspace_ids()

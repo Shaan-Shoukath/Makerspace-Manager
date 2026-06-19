@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.hardware_requests.models import HardwareRequest, HardwareRequestItem
+from apps.hardware_requests.services_return_reminders import run_return_reminders
 from apps.inventory.models import InventoryProduct
 from apps.makerspaces.models import Makerspace
 
@@ -85,6 +86,17 @@ def test_send_return_reminders_emails_only_overdue_active_unreminded_requests(ma
         contact_email="future@example.com",
         due_at=now + timedelta(days=1),
     )
+    archived_space = make_space("archived-return-reminders")
+    archived_space.archived_at = now
+    archived_space.save(update_fields=["archived_at"])
+    archived_product = make_product(archived_space)
+    archived = make_request(
+        archived_space,
+        archived_product,
+        status=HardwareRequest.Status.ISSUED,
+        contact_email="archived@example.com",
+        due_at=now - timedelta(minutes=5),
+    )
 
     out = StringIO()
     call_command("send_return_reminders", stdout=out)
@@ -95,9 +107,62 @@ def test_send_return_reminders_emails_only_overdue_active_unreminded_requests(ma
     overdue.refresh_from_db()
     returned.refresh_from_db()
     future.refresh_from_db()
+    archived.refresh_from_db()
     assert overdue.return_reminder_sent_at is not None
     assert returned.return_reminder_sent_at is None
     assert future.return_reminder_sent_at is None
+    assert archived.return_reminder_sent_at is None
 
     call_command("send_return_reminders", stdout=StringIO())
     assert len(mailoutbox) == 1
+
+
+def test_send_return_reminders_still_emails_superadmin_hidden_active_space(mailoutbox):
+    # A superadmin-hidden space (superadmin_access_enabled=False) is still fully
+    # operational for its own staff/borrowers; only the global superadmin's view is
+    # blocked. Overdue loans there must still trigger borrower-facing reminders.
+    now = timezone.now()
+    hidden_space = make_space("hidden-return-reminders")
+    hidden_space.superadmin_access_enabled = False
+    hidden_space.save(update_fields=["superadmin_access_enabled"])
+    product = make_product(hidden_space)
+    overdue = make_request(
+        hidden_space,
+        product,
+        status=HardwareRequest.Status.ISSUED,
+        contact_email="hidden-overdue@example.com",
+        due_at=now - timedelta(minutes=5),
+    )
+
+    result = run_return_reminders(now=now)
+
+    assert result["sent"] == 1
+    assert [message.to for message in mailoutbox] == [["hidden-overdue@example.com"]]
+    overdue.refresh_from_db()
+    assert overdue.return_reminder_sent_at is not None
+
+
+def test_run_return_reminders_does_not_send_when_request_already_claimed(monkeypatch):
+    now = timezone.now()
+    makerspace = make_space("return-reminder-claimed")
+    product = make_product(makerspace)
+    hardware_request = make_request(
+        makerspace,
+        product,
+        status=HardwareRequest.Status.ISSUED,
+        contact_email="claimed@example.com",
+        due_at=now - timedelta(minutes=5),
+    )
+    hardware_request.return_reminder_sent_at = now - timedelta(minutes=1)
+    hardware_request.save(update_fields=["return_reminder_sent_at"])
+    calls = []
+
+    monkeypatch.setattr(
+        "apps.hardware_requests.services_return_reminders.notifications.notify_return_due",
+        lambda request: calls.append(request.pk) or True,
+    )
+
+    result = run_return_reminders(now=now)
+
+    assert result == {"sent": 0, "skipped": 0}
+    assert calls == []

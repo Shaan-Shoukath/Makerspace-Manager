@@ -70,10 +70,13 @@ def accept_request(actor, request):
                 f"Cannot accept hardware request with status {locked.status}."
             )
 
-        for item in locked.items.order_by("product_id"):
+        items = list(locked.items.select_related("product").order_by("product_id"))
+        for item in items:
             item.accepted_quantity = item.requested_quantity
             item.save(update_fields=["accepted_quantity"])
 
+        # reserve_for_request now runs the individual-asset guard under its own
+        # product row lock, so the check and the reservation can't race apart.
         availability.reserve_for_request(locked)
 
         locked.status = HardwareRequest.Status.ACCEPTED

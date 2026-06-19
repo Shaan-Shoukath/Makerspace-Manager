@@ -40,11 +40,17 @@ def build_printing_report(makerspace_id=None, *, include_makerspace=False):
     return {
         "totals": _totals(requests),
         "printer_hours": _printer_hours(requests, include_makerspace),
+        # Per-printer activity axis: completed request grams are estimate-based
+        # because workflow.complete reconciles filament_grams_used from
+        # estimated_filament_grams. ManualPrintLog grams are added here as
+        # printer activity, not as another spool-delta source.
         "printer_outcomes": _printer_outcomes(
             requests,
             include_makerspace,
             manual_logs,
         ),
+        # Per-spool inventory axis: grams are initial-minus-remaining deltas.
+        # Manual logs already affect this when they decrement remaining weight.
         "filament_used": _filament_used(spools, include_makerspace),
         "filament_by_brand": _filament_by_brand(spools),
         "top_requesters": _top_requesters(requests, include_makerspace),
@@ -107,6 +113,11 @@ def _printer_outcomes(requests, include_makerspace, manual_logs=None):
     from django.db.models import Q
     from django.db.models.functions import Coalesce
 
+    # Request-outcome grams are per printer. For completed requests,
+    # filament_grams_used is reconciled from the operator's estimate at
+    # completion time, so it must be presented as estimate-based rather than a
+    # measured actual. This aggregation intentionally remains separate from the
+    # spool-delta reports below.
     qs = requests.filter(
         printer__isnull=False,
         status__in=COMPLETED_STATUSES + [PrintRequest.Status.FAILED],
@@ -140,6 +151,9 @@ def _printer_outcomes(requests, include_makerspace, manual_logs=None):
         by_printer[row["printer_id"]] = item
     if manual_logs is None:
         return data
+    # Manual logs are raw per-printer activity. They also decrement spools when
+    # logged through the service, so callers must not add this aggregation to
+    # spool-delta totals such as filament_used or total_grams_used.
     values = ["printer_id", "printer__name"]
     if include_makerspace:
         values.append("printer__makerspace_id")
@@ -177,9 +191,11 @@ def _printer_outcomes(requests, include_makerspace, manual_logs=None):
 
 
 def _filament_by_brand(spools):
-    # Which filament brand is used most: total grams consumed (initial - remaining)
-    # summed across every spool of that brand, ranked high-to-low. Brand totals are
-    # global (the natural reading of "most-used brand"), so no per-makerspace split.
+    # Which filament brand is used most: total spool delta (initial - remaining)
+    # summed across every spool of that brand, ranked high-to-low. Brand totals
+    # are global (the natural reading of "most-used brand"), so no per-makerspace
+    # split. This is the spool-inventory axis, not the completed-request estimate
+    # axis used by _printer_outcomes and _estimated_filament_by_period.
     totals = {}
     for spool in spools.only("brand", "initial_weight_grams", "remaining_weight_grams"):
         brand = (spool.brand or "").strip() or "Unbranded"
@@ -221,6 +237,9 @@ def _top_requesters(requests, include_makerspace):
 
 
 def _filament_used(spools, include_makerspace):
+    # Per-spool inventory delta. This includes manual usage indirectly when
+    # manual logs decrement remaining_weight_grams; keep it separate from
+    # per-printer request/manual-log activity in _printer_outcomes.
     data = []
     for spool in spools.order_by("makerspace_id", "material", "color", "id"):
         item = {
@@ -237,6 +256,9 @@ def _filament_used(spools, include_makerspace):
 
 
 def _total_spool_grams_used(spools):
+    # Aggregate of the spool-delta axis only. It is intentionally not the sum of
+    # printer_outcomes grams because completed request grams are estimate-based
+    # and manual log grams are already reflected in spool deltas.
     total = Decimal("0")
     for spool in spools.only(
         "initial_weight_grams",
@@ -254,6 +276,8 @@ def _spool_grams_used(spool):
 
 
 def _estimated_filament_by_period(requests, trunc, period_format):
+    # Completed-request period reporting uses the operator estimate captured on
+    # the request. There is no measured actual-grams input for completed prints.
     rows = (
         requests.filter(
             status__in=COMPLETED_STATUSES,

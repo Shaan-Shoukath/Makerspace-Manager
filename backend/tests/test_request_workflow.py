@@ -21,7 +21,7 @@ from apps.hardware_requests.models import (
     HardwareRequest,
     HardwareRequestItem,
 )
-from apps.inventory.models import InventoryProduct
+from apps.inventory.models import InventoryAsset, InventoryProduct, TrackingMode
 from apps.makerspaces.models import Makerspace, MakerspaceMembership
 
 pytestmark = pytest.mark.django_db
@@ -717,6 +717,73 @@ def test_accept_with_insufficient_stock_rolls_back_and_returns_409():
     item = hardware_request.items.get()
     assert item.accepted_quantity == 0
     assert AuditLog.objects.filter(action="request.accepted").count() == 0
+
+
+def test_accept_individual_request_requires_available_assets_and_returns_409():
+    makerspace = make_space("individual-asset-shortfall")
+    product = make_product(
+        makerspace,
+        tracking_mode=TrackingMode.INDIVIDUAL,
+        total_quantity=2,
+        available_quantity=2,
+    )
+    InventoryAsset.objects.create(
+        makerspace=makerspace,
+        product=product,
+        asset_tag="IA-1",
+        status=InventoryAsset.Status.AVAILABLE,
+    )
+    hardware_request = make_hardware_request(makerspace, product, quantity=2)
+    admin = make_member("individual-shortfall-admin", makerspace)
+
+    response = authenticated_client(admin).post(accept_url(hardware_request), format="json")
+
+    assert response.status_code == 409
+    assert response.data["code"] == "insufficient_stock"
+    product.refresh_from_db()
+    assert product.available_quantity == 2
+    assert product.reserved_quantity == 0
+    hardware_request.refresh_from_db()
+    assert hardware_request.status == HardwareRequest.Status.PENDING_APPROVAL
+    item = hardware_request.items.get()
+    assert item.accepted_quantity == 0
+    assert AuditLog.objects.filter(action="request.accepted").count() == 0
+
+
+def test_accept_individual_request_counts_outstanding_reservations():
+    # Drifted bucket: quantity says 2 available but only ONE physical asset exists.
+    # The first 1-unit accept reserves it (the asset stays AVAILABLE until issue); the
+    # second 1-unit accept must be blocked because that lone asset is already spoken for
+    # by the outstanding reservation, not just by issued units.
+    makerspace = make_space("individual-asset-reserved")
+    product = make_product(
+        makerspace,
+        tracking_mode=TrackingMode.INDIVIDUAL,
+        total_quantity=2,
+        available_quantity=2,
+    )
+    InventoryAsset.objects.create(
+        makerspace=makerspace,
+        product=product,
+        asset_tag="IAR-1",
+        status=InventoryAsset.Status.AVAILABLE,
+    )
+    admin = make_member("individual-reserved-admin", makerspace)
+    client = authenticated_client(admin)
+
+    first = make_hardware_request(makerspace, product, quantity=1)
+    second = make_hardware_request(makerspace, product, quantity=1)
+
+    first_response = client.post(accept_url(first), format="json")
+    assert first_response.status_code == 200
+
+    second_response = client.post(accept_url(second), format="json")
+    assert second_response.status_code == 409
+    assert second_response.data["code"] == "insufficient_stock"
+    product.refresh_from_db()
+    assert product.reserved_quantity == 1
+    second.refresh_from_db()
+    assert second.status == HardwareRequest.Status.PENDING_APPROVAL
 
 
 def test_cross_tenant_accept_returns_404_without_leaking_request_existence():

@@ -214,11 +214,24 @@ def _create_issued_request(
 
 
 def _return_request_items(request):
-    for item in request.items.select_related("product").select_for_update():
-        outstanding = item.issued_quantity - item.returned_quantity
-        if outstanding <= 0:
-            continue
-        product = InventoryProduct.objects.select_for_update().get(pk=item.product_id)
+    items = list(request.items.select_for_update())
+    outstanding_items = [
+        (item, item.issued_quantity - item.returned_quantity)
+        for item in items
+        if item.issued_quantity - item.returned_quantity > 0
+    ]
+    if not outstanding_items:
+        return
+
+    product_ids = {item.product_id for item, _outstanding in outstanding_items}
+    locked_products = {
+        product.pk: product
+        for product in InventoryProduct.objects.select_for_update()
+        .filter(pk__in=product_ids)
+        .order_by("pk")
+    }
+    for item, outstanding in outstanding_items:
+        product = locked_products[item.product_id]
         availability.return_to_available(product, outstanding)
         item.returned_quantity += outstanding
         item.save(update_fields=["returned_quantity"])

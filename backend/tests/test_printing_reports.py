@@ -6,7 +6,12 @@ from django.urls import reverse
 
 from apps.accounts.models import User
 from apps.makerspaces.models import MakerspaceMembership
-from apps.printing.models import FilamentSpool, PrintPrinter, PrintRequest
+from apps.printing.models import (
+    FilamentSpool,
+    ManualPrintLog,
+    PrintPrinter,
+    PrintRequest,
+)
 from tests.test_printing import (
     authenticated_client,
     make_bucket,
@@ -179,6 +184,71 @@ def test_makerspace_printing_report_aggregates_totals_hours_filament_and_periods
     assert {"requester", "requests", "items"} <= set(requesters[0].keys())
     counts = [row["requests"] for row in requesters]
     assert counts == sorted(counts, reverse=True)
+
+
+def test_printing_report_keeps_estimate_based_request_grams_separate_from_spool_delta():
+    makerspace = make_space("reports-estimate-axis")
+    bucket = make_bucket(makerspace)
+    requester = make_user("reports-estimate-requester", access_status=User.AccessStatus.ACTIVE)
+    manager = make_print_manager("reports-estimate-manager", makerspace)
+    printer = PrintPrinter.objects.create(makerspace=makerspace, name="Estimate rig")
+    spool = FilamentSpool.objects.create(
+        makerspace=makerspace,
+        printer=printer,
+        material="PLA",
+        color="blue",
+        initial_weight_grams=1000,
+        remaining_weight_grams=820,
+    )
+    print_request = make_completed_request(
+        bucket,
+        requester,
+        printer,
+        spool,
+        "Estimated print",
+        45,
+        "120.00",
+        completed_at(2026, 5, 3, 12),
+    )
+    # Completion reconciles request-side usage from estimated_filament_grams.
+    print_request.filament_grams_used = Decimal("120.00")
+    print_request.save(update_fields=["filament_grams_used"])
+    ManualPrintLog.objects.create(
+        makerspace=makerspace,
+        printer=printer,
+        filament_spool=spool,
+        grams_used=Decimal("30.00"),
+        title="Manual calibration",
+        note="",
+        logged_by=manager,
+    )
+
+    response = authenticated_client(manager).get(makerspace_report_url(makerspace))
+
+    assert response.status_code == 200
+    assert response.data["printer_outcomes"] == [
+        {
+            "printer_id": printer.id,
+            "printer_name": "Estimate rig",
+            "completed": 1,
+            "failed": 0,
+            "grams_used": 150.0,
+            "manual_logs": 1,
+        }
+    ]
+    assert response.data["filament_estimated_by_period"]["by_day"] == [
+        {"period": "2026-05-03", "grams": 120.0}
+    ]
+    assert response.data["filament_used"] == [
+        {
+            "spool_id": spool.id,
+            "material": "PLA",
+            "color": "blue",
+            "grams_used": 180.0,
+            "remaining_grams": 820.0,
+        }
+    ]
+    assert response.data["total_grams_used"] == 180.0
 
 
 def test_printing_report_filament_by_brand_ranks_usage_and_falls_back_to_unbranded():

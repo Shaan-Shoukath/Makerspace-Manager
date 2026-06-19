@@ -2,6 +2,7 @@ import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from apps.accounts.models import User
+from apps.admin_api import bulk_import
 from apps.apiclients.models import ApiClient, ApiKeyRequest
 from apps.audit.models import AuditLog
 from apps.inventory.models import Category, InventoryProduct
@@ -33,6 +34,41 @@ def test_bulk_import_preview_rejects_malformed_file():
     )
 
     # Malformed user input must be a 400, not a 500.
+    assert response.status_code == 400
+
+
+def test_bulk_import_preview_rejects_too_many_rows():
+    makerspace = make_space("bulk-too-many-rows")
+    admin = make_member("bulk-too-many-rows-admin", makerspace)
+    rows = [
+        {"name": f"Tool {index}", "total_quantity": "1", "available_quantity": "1"}
+        for index in range(bulk_import.MAX_IMPORT_ROWS + 1)
+    ]
+
+    response = authenticated_client(admin).post(
+        f"/api/v1/admin/makerspace/{makerspace.id}/inventory/import/preview",
+        {"rows": rows},
+        format="json",
+    )
+
+    assert response.status_code == 400
+
+
+def test_bulk_import_preview_rejects_oversized_upload():
+    makerspace = make_space("bulk-big-file")
+    admin = make_member("bulk-big-file-admin", makerspace)
+    oversized = SimpleUploadedFile(
+        "items.csv",
+        b"x" * (bulk_import.MAX_IMPORT_UPLOAD_BYTES + 1),
+        content_type="text/csv",
+    )
+
+    response = authenticated_client(admin).post(
+        f"/api/v1/admin/makerspace/{makerspace.id}/inventory/import/preview",
+        {"file": oversized},
+        format="multipart",
+    )
+
     assert response.status_code == 400
 
 

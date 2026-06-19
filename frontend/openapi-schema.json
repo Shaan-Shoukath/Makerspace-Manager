@@ -10296,7 +10296,8 @@
                         "items": {
                             "type": "object",
                             "additionalProperties": {}
-                        }
+                        },
+                        "maxItems": 5000
                     },
                     "mapping": {
                         "type": "object",
@@ -13789,13 +13790,15 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/PrintingReportPrinterOutcome"
-                        }
+                        },
+                        "description": "Per-printer request-outcome axis. Completed request grams are estimate-based; manual print logs are added as printer activity."
                     },
                     "filament_used": {
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/PrintingReportFilamentUsed"
-                        }
+                        },
+                        "description": "Per-spool inventory-delta axis. These values are independent of the per-printer request-outcome aggregation."
                     },
                     "filament_by_brand": {
                         "type": "array",
@@ -13811,13 +13814,19 @@
                     },
                     "total_grams_used": {
                         "type": "number",
-                        "format": "double"
+                        "format": "double",
+                        "description": "Total spool inventory delta across included spools, not a sum of completed-request estimates."
                     },
                     "payments": {
                         "$ref": "#/components/schemas/PrintingReportPayments"
                     },
                     "filament_estimated_by_period": {
-                        "$ref": "#/components/schemas/PrintingReportPeriods"
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PrintingReportPeriods"
+                            }
+                        ],
+                        "description": "Completed-request filament estimates grouped by completion period."
                     }
                 },
                 "required": [
@@ -13840,7 +13849,8 @@
                     },
                     "grams_used": {
                         "type": "number",
-                        "format": "double"
+                        "format": "double",
+                        "description": "Brand-level spool inventory delta: initial weight minus remaining weight."
                     },
                     "spools": {
                         "type": "integer"
@@ -13866,7 +13876,8 @@
                     },
                     "grams_used": {
                         "type": "number",
-                        "format": "double"
+                        "format": "double",
+                        "description": "Per-spool inventory delta: initial weight minus remaining weight. Manual print logs already affect this total when they decrement a spool."
                     },
                     "remaining_grams": {
                         "type": "number",
@@ -13919,7 +13930,8 @@
                     },
                     "grams": {
                         "type": "number",
-                        "format": "double"
+                        "format": "double",
+                        "description": "Estimated filament grams for completed print requests in this period."
                     }
                 },
                 "required": [
@@ -13999,7 +14011,8 @@
                     },
                     "grams_used": {
                         "type": "number",
-                        "format": "double"
+                        "format": "double",
+                        "description": "Per-printer request-outcome grams. Completed print requests use the estimate reconciled at completion; manual print-log grams are added on this axis. This is not a measured actual for completed requests."
                     },
                     "manual_logs": {
                         "type": "integer"

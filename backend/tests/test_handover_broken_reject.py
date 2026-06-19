@@ -83,6 +83,8 @@ def test_issue_rejects_broken_removed_from_inventory(monkeypatch):
     assert product.issued_quantity == 2
     assert product.needs_fix_quantity == 0
     assert product.total_quantity == 2  # scrapped unit left inventory entirely
+    item.refresh_from_db()
+    assert item.needs_fix_quantity == 0
 
 
 def test_broken_reject_on_individual_item_returns_400(monkeypatch):

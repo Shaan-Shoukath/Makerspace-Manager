@@ -27,15 +27,27 @@ OPTIONAL_FIELDS = {
     "lost_quantity",
 }
 VALID_FIELDS = REQUIRED_FIELDS | OPTIONAL_FIELDS
+MAX_IMPORT_ROWS = 5000
+MAX_IMPORT_UPLOAD_BYTES = 5 * 1024 * 1024
+
+
+class _BulkImportLimitError(ValueError):
+    pass
 
 
 def rows_from_upload(uploaded_file):
     name = uploaded_file.name.lower()
+    size = getattr(uploaded_file, "size", None)
+    if size is not None and size > MAX_IMPORT_UPLOAD_BYTES:
+        raise ValueError(
+            f"Import file must be {MAX_IMPORT_UPLOAD_BYTES} bytes or smaller."
+        )
     data = uploaded_file.read()
     if name.endswith(".json"):
         parsed = json.loads(data.decode("utf-8-sig"))
         if not isinstance(parsed, list):
             raise ValueError("JSON import must be a list of row objects.")
+        _validate_row_count(parsed)
         return parsed
     if name.endswith(".tsv"):
         return _delimited_rows(data, "\t")
@@ -46,7 +58,14 @@ def rows_from_upload(uploaded_file):
 
 def _delimited_rows(data, delimiter):
     text = data.decode("utf-8-sig")
-    return list(csv.DictReader(io.StringIO(text), delimiter=delimiter))
+    rows = []
+    for row in csv.DictReader(io.StringIO(text), delimiter=delimiter):
+        rows.append(row)
+        if len(rows) > MAX_IMPORT_ROWS:
+            raise _BulkImportLimitError(
+                f"Bulk import is limited to {MAX_IMPORT_ROWS} rows."
+            )
+    return rows
 
 
 def _xlsx_rows(data):
@@ -57,16 +76,30 @@ def _xlsx_rows(data):
     try:
         workbook = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         sheet = workbook.active
-        rows = list(sheet.iter_rows(values_only=True))
+        rows = sheet.iter_rows(values_only=True)
+        header_row = next(rows, None)
+        if not header_row:
+            return []
+        headers = [str(value or "").strip() for value in header_row]
+        parsed_rows = []
+        for row in rows:
+            parsed_rows.append(
+                {headers[index]: value for index, value in enumerate(row) if index < len(headers)}
+            )
+            if len(parsed_rows) > MAX_IMPORT_ROWS:
+                raise _BulkImportLimitError(
+                    f"Bulk import is limited to {MAX_IMPORT_ROWS} rows."
+                )
+        return parsed_rows
+    except _BulkImportLimitError:
+        raise
     except Exception as exc:  # corrupt/unsupported workbook -> treat as bad input
         raise ValueError("XLSX file could not be read.") from exc
-    if not rows:
-        return []
-    headers = [str(value or "").strip() for value in rows[0]]
-    return [
-        {headers[index]: value for index, value in enumerate(row) if index < len(headers)}
-        for row in rows[1:]
-    ]
+
+
+def _validate_row_count(rows):
+    if len(rows) > MAX_IMPORT_ROWS:
+        raise _BulkImportLimitError(f"Bulk import is limited to {MAX_IMPORT_ROWS} rows.")
 
 
 def preview_import(makerspace, rows, mapping):

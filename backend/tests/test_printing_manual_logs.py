@@ -222,6 +222,37 @@ def test_manual_print_log_rejects_non_positive_grams(grams_used):
     assert spool.remaining_weight_grams == Decimal("1000.00")
 
 
+def test_manual_print_log_rejects_over_bound_grams():
+    makerspace = make_space("manual-log-grams-too-large")
+    manager = make_print_manager("manual-log-grams-too-large-manager", makerspace)
+    printer = PrintPrinter.objects.create(makerspace=makerspace, name="Prusa")
+    spool = FilamentSpool.objects.create(
+        makerspace=makerspace,
+        printer=printer,
+        material="PLA",
+        initial_weight_grams=1000,
+        remaining_weight_grams=1000,
+    )
+
+    response = authenticated_client(manager).post(
+        manual_log_url(),
+        {
+            "makerspace_id": makerspace.id,
+            "printer_id": printer.id,
+            "filament_spool_id": spool.id,
+            "grams_used": "1000000.00",
+            "title": "Bad grams",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "grams_used" in response.data
+    assert not ManualPrintLog.objects.exists()
+    spool.refresh_from_db()
+    assert spool.remaining_weight_grams == Decimal("1000.00")
+
+
 def test_printing_report_merges_manual_logs_and_includes_manual_only_printers():
     makerspace = make_space("manual-log-report")
     bucket = make_bucket(makerspace)

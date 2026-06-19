@@ -23,6 +23,14 @@ def make_space(slug):
     return Makerspace.objects.create(name=slug, slug=slug)
 
 
+def make_superadmin(username):
+    return make_user(
+        username,
+        role=User.Role.SUPERADMIN,
+        access_status=User.AccessStatus.ACTIVE,
+    )
+
+
 def make_member(username, makerspace, membership_role="space_manager", role=User.Role.SPACE_MANAGER):
     user = make_user(username, role=role, access_status=User.AccessStatus.ACTIVE)
     MakerspaceMembership.objects.create(
@@ -37,6 +45,13 @@ def upload_url(makerspace):
     return reverse(
         "evidence_admin:evidence-upload-url",
         kwargs={"makerspace_id": makerspace.id},
+    )
+
+
+def upload_url_for_id(makerspace_id):
+    return reverse(
+        "evidence_admin:evidence-upload-url",
+        kwargs={"makerspace_id": makerspace_id},
     )
 
 
@@ -269,6 +284,26 @@ def test_staff_user_without_membership_cannot_request_upload_url(monkeypatch):
     assert AuditLog.objects.count() == 0
 
 
+def test_upload_url_with_missing_makerspace_returns_404(monkeypatch):
+    monkeypatch.setattr(
+        "apps.evidence.views.presigned_upload",
+        lambda object_key, content_type: pytest.fail("storage should not be called"),
+    )
+    missing_id = Makerspace.objects.order_by("-id").first()
+    missing_id = (missing_id.id if missing_id else 0) + 1000
+    user = make_superadmin("upload-missing-space-super")
+
+    response = authenticated_client(user).post(
+        upload_url_for_id(missing_id),
+        {"evidence_type": "issue", "content_type": "image/png"},
+        format="json",
+    )
+
+    assert response.status_code == 404
+    assert EvidencePhoto.objects.count() == 0
+    assert AuditLog.objects.count() == 0
+
+
 @pytest.mark.parametrize("content_type", ["image/svg+xml", "application/pdf"])
 def test_bad_upload_content_type_returns_400_without_creating_rows(
     monkeypatch,
@@ -342,6 +377,28 @@ def test_evidence_detail_is_scoped_to_user_makerspaces(monkeypatch):
     )
 
     response = authenticated_client(user).get(detail_url(photo))
+
+    assert response.status_code == 404
+    assert AuditLog.objects.count() == 0
+
+
+def test_superadmin_cannot_get_hidden_makerspace_evidence_detail(monkeypatch):
+    makerspace = make_space("detail-hidden-space")
+    makerspace.superadmin_access_enabled = False
+    makerspace.save(update_fields=["superadmin_access_enabled"])
+    uploader = make_member("detail-hidden-uploader", makerspace)
+    photo = make_photo(makerspace, uploader)
+    superadmin = make_superadmin("detail-hidden-super")
+    monkeypatch.setattr(
+        "apps.evidence.views.object_exists",
+        lambda object_key: pytest.fail("storage should not be checked"),
+    )
+    monkeypatch.setattr(
+        "apps.evidence.views.presigned_get_url",
+        lambda object_key: pytest.fail("signed URL should not be issued"),
+    )
+
+    response = authenticated_client(superadmin).get(detail_url(photo))
 
     assert response.status_code == 404
     assert AuditLog.objects.count() == 0

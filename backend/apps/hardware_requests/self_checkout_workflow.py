@@ -131,7 +131,7 @@ def qr_has_active_loan(makerspace, qr):
     A direct handout can bundle several QRs onto one loan; only the first lands in
     the `qr_code` FK (the partial-unique constraint allows just one), so the rest
     are tracked in `qr_ids`. Checking both closes the re-issue gap where a
-    secondary QR looked free. Callers hold the QR row lock via `_locked_qr`, so the
+    secondary QR looked free. Callers hold the relevant QR row lock(s), so the
     check is race-free against concurrent checkouts of the same QR."""
     return (
         PublicToolLoan.objects.filter(

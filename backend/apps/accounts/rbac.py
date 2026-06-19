@@ -144,7 +144,7 @@ def can(actor, action, makerspace_id=None):
     if actor.is_superuser or actor.role == User.Role.SUPERADMIN:
         if makerspace_id is None:
             return True
-        if makerspace_id in superadmin_hidden_makerspace_ids():
+        if _id_in(makerspace_id, superadmin_hidden_makerspace_ids()):
             # Hard hide: global superpower is withheld for a hidden makerspace.
             # A superadmin who is an explicit member still gets that role's actions.
             role = membership_role(actor, makerspace_id)
@@ -247,7 +247,7 @@ def superadmin_hidden_block_applies(actor, makerspace_id, action=None):
     """True when a global superadmin must be HARD-blocked from `makerspace_id`."""
     if not _is_superadmin(actor) or makerspace_id is None:
         return False
-    if makerspace_id not in superadmin_hidden_makerspace_ids():
+    if not _id_in(makerspace_id, superadmin_hidden_makerspace_ids()):
         return False
     role = membership_role(actor, makerspace_id)
     if role is None:

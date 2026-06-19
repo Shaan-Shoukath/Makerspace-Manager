@@ -233,6 +233,62 @@ def test_public_checkout_and_return_move_inventory_and_record_scans():
 
 
 @override_settings(API_CLIENT_AUTH_REQUIRED=False)
+def test_public_box_checkout_return_restores_all_items():
+    makerspace = make_space("checkout-return-box")
+    box = Box.objects.create(makerspace=makerspace, label="Loan shelf")
+    product_a = make_product(
+        makerspace,
+        name="Logic Analyzer",
+        box=box,
+        public_self_checkout_enabled=True,
+    )
+    product_b = make_product(
+        makerspace,
+        name="Oscilloscope Probe",
+        box=box,
+        public_self_checkout_enabled=True,
+    )
+    qr = QrCode.objects.create(
+        makerspace=makerspace,
+        target_type=QrCode.TargetType.BOX,
+        target_id=box.id,
+    )
+    client = api_client()
+
+    checkout = client.post(
+        checkout_url(makerspace),
+        {"identifier": "member-1", "payload": qr.payload},
+        format="json",
+    )
+
+    assert checkout.status_code == 201
+    assert sorted(item["product_name"] for item in checkout.data["items"]) == [
+        "Logic Analyzer",
+        "Oscilloscope Probe",
+    ]
+    product_a.refresh_from_db()
+    product_b.refresh_from_db()
+    assert product_a.available_quantity == 1
+    assert product_a.issued_quantity == 1
+    assert product_b.available_quantity == 1
+    assert product_b.issued_quantity == 1
+
+    returned = client.post(
+        return_url(makerspace),
+        {"identifier": "member-1", "payload": qr.payload},
+        format="json",
+    )
+
+    assert returned.status_code == 200
+    product_a.refresh_from_db()
+    product_b.refresh_from_db()
+    assert product_a.available_quantity == 2
+    assert product_a.issued_quantity == 0
+    assert product_b.available_quantity == 2
+    assert product_b.issued_quantity == 0
+
+
+@override_settings(API_CLIENT_AUTH_REQUIRED=False)
 def test_public_return_requires_same_verified_user():
     makerspace = make_space("checkout-other-user")
     product = make_product(makerspace, public_self_checkout_enabled=True)

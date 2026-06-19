@@ -77,6 +77,51 @@ def test_cross_makerspace_transfer_credits_existing_destination_product():
     assert InventoryProduct.objects.filter(makerspace=dest, name="Multimeter").count() == 1
 
 
+def test_cross_makerspace_transfer_does_not_credit_archived_destination_product():
+    source = make_space("xfer-src-archived")
+    dest = make_space("xfer-dst-archived")
+    superadmin = make_user(
+        "xfer-super-archived",
+        role=User.Role.SUPERADMIN,
+        access_status=User.AccessStatus.ACTIVE,
+    )
+    product = make_product(source, name="Oscilloscope", total_quantity=10, available_quantity=10)
+    archived = make_product(
+        dest,
+        name="Oscilloscope",
+        total_quantity=2,
+        available_quantity=2,
+        is_public=False,
+        is_archived=True,
+    )
+
+    created = _cross_transfer(superadmin, source, dest, product, 4)
+
+    assert created.status_code == 201
+    product.refresh_from_db()
+    archived.refresh_from_db()
+    assert product.available_quantity == 6 and product.total_quantity == 6
+    assert archived.available_quantity == 2 and archived.total_quantity == 2
+    fresh = InventoryProduct.objects.get(
+        makerspace=dest,
+        name="Oscilloscope",
+        is_archived=False,
+    )
+    assert fresh.available_quantity == 4 and fresh.total_quantity == 4
+    assert fresh.is_public is False
+    assert (
+        InventoryProduct.objects.filter(makerspace=dest, name="Oscilloscope")
+        .count()
+        == 2
+    )
+    assert (
+        product.available_quantity
+        + archived.available_quantity
+        + fresh.available_quantity
+        == 12
+    )
+
+
 def test_cross_makerspace_transfer_rejects_individual_destination_match():
     source = make_space("xfer-src5")
     dest = make_space("xfer-dst5")

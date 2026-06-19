@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from apps.printing.models import ManualPrintLog
@@ -7,6 +9,11 @@ class ManualPrintLogSerializer(serializers.ModelSerializer):
     makerspace_id = serializers.IntegerField()
     printer_id = serializers.IntegerField(allow_null=True)
     filament_spool_id = serializers.IntegerField(allow_null=True)
+    grams_used = serializers.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        max_value=Decimal("999999.99"),
+    )
     printer_name = serializers.CharField(
         source="printer.name",
         read_only=True,

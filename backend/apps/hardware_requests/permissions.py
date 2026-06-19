@@ -54,9 +54,25 @@ class CanIssueRequest(BasePermission):
         return bool(rbac.makerspaces_for_action(user, rbac.Action.ISSUE_REQUEST))
 
 
+class CanIssueDirectLoan(BasePermission):
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        if not _active_authenticated(user) or not staff_origin_scope_allows(request, view):
+            return False
+        return bool(rbac.makerspaces_for_action(user, rbac.Action.ISSUE_DIRECT_LOAN))
+
+
 class CanReturnRequest(BasePermission):
     def has_permission(self, request, view):
         user = getattr(request, "user", None)
         if not _active_authenticated(user) or not staff_origin_scope_allows(request, view):
+            return False
+        return bool(rbac.makerspaces_for_action(user, rbac.Action.RETURN_REQUEST))
+
+
+class CanReturnDirectLoan(BasePermission):
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        if not _active_authenticated(user):
             return False
         return bool(rbac.makerspaces_for_action(user, rbac.Action.RETURN_REQUEST))

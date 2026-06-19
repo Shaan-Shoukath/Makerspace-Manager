@@ -127,7 +127,11 @@ def _apply_cross_makerspace_line(
 
     dest = (
         InventoryProduct.objects.select_for_update()
-        .filter(makerspace_id=dest_makerspace_id, name__iexact=src.name)
+        .filter(
+            makerspace_id=dest_makerspace_id,
+            name__iexact=src.name,
+            is_archived=False,
+        )
         .first()
     )
     if dest is not None and dest.tracking_mode == TrackingMode.INDIVIDUAL:

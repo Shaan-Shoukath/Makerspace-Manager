@@ -5,14 +5,13 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.audit import services as audit
-from apps.boxes.models import Box, QrScanEvent
+from apps.boxes.models import Box, QrCode, QrScanEvent
 from apps.checkin import client as checkin
 from apps.hardware_requests.models import HardwareRequest, PublicToolLoan
 from apps.hardware_requests.self_checkout_workflow import (
     _checkout_target,
     _issue_product,
     _issued_request,
-    _locked_qr,
     _requester,
     _return_request_items,
     qr_has_active_loan,
@@ -54,11 +53,10 @@ def issue_direct_loan(
         product_quantities = Counter()
         asset_ids = []
         labels = []
-        qrs = []
+        qrs = _locked_qrs_for_payloads(makerspace, qr_payloads)
 
         seen_qr_ids = set()
-        for payload in qr_payloads:
-            qr = _locked_qr(makerspace, payload)
+        for qr in qrs:
             if qr.id in seen_qr_ids:
                 # Same physical QR scanned twice in one handout would decrement
                 # stock twice for one item; reject before any mutation.
@@ -70,7 +68,6 @@ def issue_direct_loan(
                 qr, require_public=False
             )
             labels.append(label)
-            qrs.append(qr)
             product_quantities.update(quantities)
             asset_ids.extend(target_asset_ids)
 
@@ -149,6 +146,26 @@ def return_direct_loan(loan, actor):
             actor, "admin_direct.returned", locked.makerspace, locked.request, locked
         )
         return locked
+
+
+def _locked_qrs_for_payloads(makerspace, payloads):
+    if not payloads:
+        return []
+
+    unique_payloads = set(payloads)
+    qrs_by_payload = {
+        qr.payload: qr
+        for qr in QrCode.objects.select_for_update()
+        .filter(
+            payload__in=unique_payloads,
+            makerspace=makerspace,
+            status=QrCode.Status.ACTIVE,
+        )
+        .order_by("pk")
+    }
+    if len(qrs_by_payload) != len(unique_payloads):
+        raise RequestValidationError("QR code is not active for this makerspace.")
+    return [qrs_by_payload[payload] for payload in payloads]
 
 
 def _manual_product(makerspace, product_id):

@@ -55,6 +55,16 @@ def direct_url(makerspace):
     return f"/api/v1/admin/makerspace/{makerspace.id}/direct-loans"
 
 
+def staff_verify_url(makerspace):
+    return f"/api/v1/admin/makerspace/{makerspace.id}/checkin/verify"
+
+
+def set_staff_domain(makerspace, domain):
+    makerspace.frontend_domain = domain
+    makerspace.save(update_fields=["frontend_domain"])
+    return f"https://{domain}"
+
+
 @override_settings(API_CLIENT_AUTH_REQUIRED=False)
 def test_admin_direct_manual_handout_and_return_logs_product():
     makerspace = make_space()
@@ -206,6 +216,117 @@ def test_suspended_admin_cannot_issue_direct_loan():
 
 
 @override_settings(API_CLIENT_AUTH_REQUIRED=False)
+def test_direct_loan_originless_list_uses_membership_fallback():
+    makerspace = make_space("direct-originless-list")
+    admin = make_admin(makerspace)
+    product = make_product(makerspace)
+    client = authed(admin)
+
+    issued = client.post(
+        direct_url(makerspace),
+        {
+            "identifier": "member-direct",
+            "items": [{"product_id": product.id, "quantity": 1}],
+        },
+        format="json",
+    )
+    listed = client.get(direct_url(makerspace))
+
+    assert issued.status_code == 201
+    assert listed.status_code == 200
+
+
+@override_settings(API_CLIENT_AUTH_REQUIRED=False)
+def test_direct_loan_rejects_different_staff_origin_for_scoped_views():
+    primary = make_space("direct-origin-primary")
+    other = make_space("direct-origin-other")
+    set_staff_domain(primary, "primary.example.com")
+    wrong_origin = set_staff_domain(other, "other.example.com")
+    admin = make_admin(primary)
+    product = make_product(primary, total_quantity=5, available_quantity=5)
+    client = authed(admin)
+
+    issued = client.post(
+        direct_url(primary),
+        {
+            "identifier": "member-direct",
+            "items": [{"product_id": product.id, "quantity": 1}],
+        },
+        format="json",
+    )
+    assert issued.status_code == 201
+    loan = PublicToolLoan.objects.get()
+
+    listed = client.get(direct_url(primary), HTTP_ORIGIN=wrong_origin)
+    created = client.post(
+        direct_url(primary),
+        {
+            "identifier": "member-direct-2",
+            "items": [{"product_id": product.id, "quantity": 1}],
+        },
+        format="json",
+        HTTP_ORIGIN=wrong_origin,
+    )
+    verified = client.post(
+        staff_verify_url(primary),
+        {"identifier": "member-direct"},
+        format="json",
+        HTTP_ORIGIN=wrong_origin,
+    )
+    returned = client.post(
+        f"/api/v1/admin/direct-loans/{loan.id}/return",
+        {},
+        format="json",
+        HTTP_ORIGIN=wrong_origin,
+    )
+
+    assert listed.status_code == 403
+    assert created.status_code == 403
+    assert verified.status_code == 403
+    assert returned.status_code == 404
+    assert PublicToolLoan.objects.count() == 1
+    loan.refresh_from_db()
+    assert loan.status == PublicToolLoan.Status.CHECKED_OUT
+
+
+@override_settings(API_CLIENT_AUTH_REQUIRED=False)
+def test_direct_return_hides_cross_tenant_and_missing_loan_ids():
+    primary = make_space("direct-return-primary")
+    other = make_space("direct-return-other")
+    primary_admin = make_admin(primary)
+    other_admin = make_admin(other)
+    other_product = make_product(other)
+
+    issued = authed(other_admin).post(
+        direct_url(other),
+        {
+            "identifier": "member-direct",
+            "items": [{"product_id": other_product.id, "quantity": 1}],
+        },
+        format="json",
+    )
+    assert issued.status_code == 201
+    other_loan = PublicToolLoan.objects.get()
+    client = authed(primary_admin)
+
+    cross_tenant = client.post(
+        f"/api/v1/admin/direct-loans/{other_loan.id}/return",
+        {},
+        format="json",
+    )
+    missing = client.post(
+        "/api/v1/admin/direct-loans/999999/return",
+        {},
+        format="json",
+    )
+
+    assert cross_tenant.status_code == 404
+    assert missing.status_code == 404
+    other_loan.refresh_from_db()
+    assert other_loan.status == PublicToolLoan.Status.CHECKED_OUT
+
+
+@override_settings(API_CLIENT_AUTH_REQUIRED=False)
 def test_every_qr_in_multi_qr_direct_loan_is_tracked():
     makerspace = make_space("direct-multi-qr")
     admin = make_admin(makerspace)
@@ -236,6 +357,22 @@ def test_every_qr_in_multi_qr_direct_loan_is_tracked():
 
     assert reissue.status_code == 409
     assert PublicToolLoan.objects.count() == 1
+
+    returned = client.post(
+        f"/api/v1/admin/direct-loans/{loan.id}/return",
+        {},
+        format="json",
+    )
+
+    assert returned.status_code == 200
+    loan.refresh_from_db()
+    product_a.refresh_from_db()
+    product_b.refresh_from_db()
+    assert loan.status == PublicToolLoan.Status.RETURNED
+    assert product_a.available_quantity == 3
+    assert product_a.issued_quantity == 0
+    assert product_b.available_quantity == 3
+    assert product_b.issued_quantity == 0
 
 
 @override_settings(API_CLIENT_AUTH_REQUIRED=False)

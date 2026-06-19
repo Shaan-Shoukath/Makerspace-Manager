@@ -1,6 +1,6 @@
 from django.db import connection, transaction
 
-from apps.inventory.models import InventoryProduct
+from apps.inventory.models import InventoryAsset, InventoryProduct, TrackingMode
 
 
 class InsufficientStock(Exception):
@@ -121,12 +121,25 @@ def reserve_for_request(request):
         .order_by("pk")
     }
 
+    # Aggregate accepted quantity per product (a product may span multiple items).
+    required_by_product = {}
     for item in items:
-        quantity = item.accepted_quantity
-        if quantity <= 0:
-            continue
+        if item.accepted_quantity > 0:
+            required_by_product[item.product_id] = (
+                required_by_product.get(item.product_id, 0) + item.accepted_quantity
+            )
 
-        product = products[item.product_id]
+    for product_id in sorted(required_by_product):
+        quantity = required_by_product[product_id]
+        product = products[product_id]
+
+        # Individual-asset guard runs UNDER the same row lock as the reservation
+        # update, reading the freshly-locked reserved_quantity as the committed
+        # baseline. A concurrent accept for the same product blocks on this lock
+        # until we commit, then re-reads the incremented baseline and is rejected —
+        # closing the check-then-reserve race a standalone pre-check would leave open.
+        assert_individual_assets_available(product, quantity)
+
         if product.available_quantity < quantity:
             raise InsufficientStock(
                 f"Insufficient stock for product {product.pk}: "
@@ -141,6 +154,32 @@ def reserve_for_request(request):
                 "reserved_quantity",
                 "updated_at",
             ]
+        )
+
+
+def assert_individual_assets_available(product, required_qty):
+    """Fail fast when quantity buckets outpace serialized asset rows.
+
+    Individual-mode asset rows only flip AVAILABLE->ISSUED at handover, so a unit
+    that is accepted-but-not-yet-issued still leaves its asset row AVAILABLE while
+    `reserved_quantity` is incremented. Counting AVAILABLE assets alone would let a
+    drifted-high quantity bucket reserve the same physical asset for two requests;
+    subtract the already-reserved (committed-but-unissued) units so the available
+    physical assets must cover this request PLUS every outstanding reservation."""
+    required_qty = int(required_qty)
+    if product.tracking_mode != TrackingMode.INDIVIDUAL or required_qty <= 0:
+        return
+
+    available_assets = InventoryAsset.objects.filter(
+        product_id=product.pk,
+        status=InventoryAsset.Status.AVAILABLE,
+    ).count()
+    already_reserved = max(int(getattr(product, "reserved_quantity", 0) or 0), 0)
+    if available_assets < required_qty + already_reserved:
+        raise InsufficientStock(
+            f"Insufficient available assets for product {product.pk}: "
+            f"requested {required_qty}, already reserved {already_reserved}, "
+            f"available assets {available_assets}."
         )
 
 
@@ -202,7 +241,7 @@ def issue_items(request, rejects_by_item=None):
         product.save(update_fields=update_fields)
 
         item.issued_quantity = issued
-        item.needs_fix_quantity = broken
+        item.needs_fix_quantity = 0 if disposition == REJECT_REMOVE else broken
         item.save(update_fields=["issued_quantity", "needs_fix_quantity"])
 
 

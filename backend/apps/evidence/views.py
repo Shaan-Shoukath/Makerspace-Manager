@@ -118,11 +118,12 @@ class EvidenceDetailView(generics.RetrieveAPIView):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        return rbac.scope_by_action(
+        qs = rbac.scope_by_action(
             self.request.user,
             rbac.Action.UPLOAD_EVIDENCE,
             qs,
         )
+        return rbac.hide_from_superadmin(self.request.user, qs, "makerspace_id")
 
     @extend_schema(
         responses={

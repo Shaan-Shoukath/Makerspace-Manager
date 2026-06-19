@@ -18,13 +18,16 @@ from apps.hardware_requests.direct_loan_serializers import (
     StaffCheckinVerifyResponseSerializer,
 )
 from apps.hardware_requests.models import PublicToolLoan
+from apps.hardware_requests.permissions import CanIssueDirectLoan, CanReturnDirectLoan
 from apps.hardware_requests.view_helpers import ACTION_ERROR_RESPONSES
 from apps.makerspaces.guards import require_module
 from apps.makerspaces.models import Makerspace
+from apps.makerspaces.origin_scope import origin_scoped_makerspace_id
 from apps.makerspaces.platform import module_enabled
 
 
 class DirectLoanListCreateView(generics.ListAPIView):
+    permission_classes = [CanIssueDirectLoan]
     serializer_class = DirectLoanSerializer
 
     def get_queryset(self):
@@ -74,6 +77,8 @@ class DirectLoanListCreateView(generics.ListAPIView):
 
 
 class DirectLoanReturnView(APIView):
+    permission_classes = [CanReturnDirectLoan]
+
     @extend_schema(
         tags=["Admin requests"],
         summary="Return direct handout loan",
@@ -83,9 +88,20 @@ class DirectLoanReturnView(APIView):
     def post(self, request, pk, *args, **kwargs):
         # Only admin_direct loans use this path; a public self-checkout loan must
         # go through the QR/requester return flow, not the admin direct-return.
-        loan = get_object_or_404(
-            PublicToolLoan, pk=pk, source=PublicToolLoan.Source.ADMIN_DIRECT
+        allowed = rbac.makerspaces_for_action(request.user, rbac.Action.RETURN_REQUEST)
+        origin_scope = origin_scoped_makerspace_id(request)
+        if origin_scope is not None:
+            allowed = (
+                {origin_scope}
+                if allowed is rbac.ALL
+                else set(allowed) & {origin_scope}
+            )
+        queryset = PublicToolLoan.objects.filter(
+            source=PublicToolLoan.Source.ADMIN_DIRECT
         )
+        if allowed is not rbac.ALL:
+            queryset = queryset.filter(makerspace_id__in=allowed)
+        loan = get_object_or_404(queryset, pk=pk)
         require_module(loan.makerspace, "self_checkout")
         _require(request.user, rbac.Action.RETURN_REQUEST, loan.makerspace_id)
         returned = direct_loan_workflow.return_direct_loan(loan, request.user)
@@ -93,6 +109,7 @@ class DirectLoanReturnView(APIView):
 
 
 class StaffCheckinVerifyView(APIView):
+    permission_classes = [CanIssueDirectLoan]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "staff_checkin_verify"
 

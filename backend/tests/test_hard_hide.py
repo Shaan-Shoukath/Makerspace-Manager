@@ -118,6 +118,26 @@ def test_superadmin_rbac_hard_hides_disabled_makerspace():
     assert visible in scoped_spaces
 
 
+def test_superadmin_hidden_checks_accept_string_makerspace_ids():
+    hidden = make_space("hard-hide-string-id")
+    hide_makerspace(hidden)
+    superadmin = make_superadmin("hard-hide-string-id-super")
+    makerspace_id = str(hidden.id)
+
+    assert (
+        rbac.can(superadmin, rbac.Action.EDIT_INVENTORY, makerspace_id)
+        is False
+    )
+    assert (
+        rbac.superadmin_hidden_block_applies(
+            superadmin,
+            makerspace_id,
+            rbac.Action.EDIT_INVENTORY,
+        )
+        is True
+    )
+
+
 def test_superadmin_rbac_preserves_all_fast_path_when_no_makerspace_is_hidden():
     superadmin = make_superadmin("hard-hide-fast-path-super")
     make_space("hard-hide-fast-path-visible")
@@ -290,6 +310,30 @@ def test_superadmin_break_glass_create_is_space_manager_only_and_fresh_user_only
     assert not MakerspaceMembership.objects.filter(
         user=existing,
         makerspace=hidden,
+    ).exists()
+
+
+def test_staff_create_rejects_weak_supplied_password():
+    makerspace = make_space("hard-hide-weak-password")
+    superadmin = make_superadmin("hard-hide-weak-password-super")
+    client = authenticated_client(superadmin)
+
+    response = client.post(
+        reverse("admin-users-print-managers"),
+        {
+            "username": "hard-hide-weak-password-user",
+            "email": "hard-hide-weak-password-user@example.com",
+            "makerspace_id": makerspace.id,
+            "role": MakerspaceMembership.Role.PRINT_MANAGER,
+            "password": "123",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "password" in response.data
+    assert not User.objects.filter(
+        username="hard-hide-weak-password-user",
     ).exists()
 
 

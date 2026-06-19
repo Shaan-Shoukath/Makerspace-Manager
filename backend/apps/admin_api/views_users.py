@@ -138,7 +138,7 @@ def _global_role_for_membership(target_role):
 
 def _can_create_staff_role(user, target_role, makerspace_id):
     if user.is_superuser or user.role == User.Role.SUPERADMIN:
-        if int(makerspace_id) in rbac.superadmin_hidden_makerspace_ids():
+        if rbac._id_in(makerspace_id, rbac.superadmin_hidden_makerspace_ids()):
             return target_role == MakerspaceMembership.Role.SPACE_MANAGER
         return True
     if target_role not in (

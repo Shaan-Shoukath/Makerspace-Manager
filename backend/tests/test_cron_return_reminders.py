@@ -90,6 +90,11 @@ def test_return_reminder_cron_sends_due_reminder_and_marks_request(monkeypatch):
     makerspace = make_space("cron-reminder")
     product = make_product(makerspace)
     hardware_request = make_overdue_request(makerspace, product)
+    archived_space = make_space("archived-cron-reminder")
+    archived_space.archived_at = timezone.now()
+    archived_space.save(update_fields=["archived_at"])
+    archived_product = make_product(archived_space)
+    archived_request = make_overdue_request(archived_space, archived_product)
     monkeypatch.setattr(
         "apps.hardware_requests.notifications.notify_return_due",
         lambda request: True,
@@ -102,6 +107,8 @@ def test_return_reminder_cron_sends_due_reminder_and_marks_request(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.data["sent"] >= 1
+    assert response.data["sent"] == 1
     hardware_request.refresh_from_db()
+    archived_request.refresh_from_db()
     assert hardware_request.return_reminder_sent_at is not None
+    assert archived_request.return_reminder_sent_at is None

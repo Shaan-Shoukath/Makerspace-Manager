@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.hardware_requests.models import HardwareRequest, HardwareRequestItem, PublicToolLoan
+from apps.inventory.models import InventoryAsset
 from tests.return_helpers import authenticated_client, make_member, make_product, make_space, make_user
 
 pytestmark = pytest.mark.django_db
@@ -334,6 +335,71 @@ def test_new_makerspace_reports_return_sane_rows():
     assert recently_added.status_code == 200
     assert recently_added.data["rows"][0] == ["product_name", "created_at", "total_quantity"]
     assert recently_added.data["rows"][1][0] == "Beta Kit"
+
+
+def test_reports_exclude_archived_products_from_active_product_surfaces():
+    makerspace = make_space("reports-archived-products")
+    manager = make_member("reports-archived-products-manager", makerspace)
+    active = make_product(
+        makerspace,
+        name="Active Meter",
+        total_quantity=8,
+        available_quantity=4,
+        issued_quantity=2,
+        damaged_quantity=1,
+        lost_quantity=1,
+    )
+    archived = make_product(
+        makerspace,
+        name="Archived Meter",
+        total_quantity=100,
+        available_quantity=76,
+        issued_quantity=9,
+        damaged_quantity=8,
+        lost_quantity=7,
+        is_archived=True,
+    )
+    # One asset on each product: the archived product's asset must NOT inflate the
+    # summary asset total once archived inventory is excluded.
+    InventoryAsset.objects.create(makerspace=makerspace, product=active, asset_tag="ACT-1")
+    InventoryAsset.objects.create(makerspace=makerspace, product=archived, asset_tag="ARC-1")
+    _request_loan(makerspace, active, "reports-active-holder", quantity=2)
+    _request_loan(makerspace, archived, "reports-archived-holder", quantity=9)
+    client = authenticated_client(manager)
+
+    summary = client.get(f"/api/v1/admin/makerspace/{makerspace.id}/analytics/summary")
+    damaged_lost = client.get(f"/api/v1/admin/makerspace/{makerspace.id}/analytics/damaged-lost")
+    taken_items = client.get(f"/api/v1/admin/makerspace/{makerspace.id}/analytics/taken-items")
+    most_lent = client.get(f"/api/v1/admin/makerspace/{makerspace.id}/analytics/most-lent")
+    top_borrowers = client.get(f"/api/v1/admin/makerspace/{makerspace.id}/analytics/top-borrowers")
+
+    assert summary.status_code == 200
+    assert summary.data["products"] == 1
+    assert summary.data["assets"] == 1
+    assert summary.data["available_quantity"] == 4
+    assert summary.data["issued_quantity"] == 2
+    assert summary.data["damaged_quantity"] == 1
+    assert summary.data["missing_quantity"] == 1
+    assert damaged_lost.status_code == 200
+    assert damaged_lost.data["rows"] == [
+        ["product_name", "damaged_quantity", "lost_quantity"],
+        ["Active Meter", 1, 1],
+    ]
+    assert taken_items.status_code == 200
+    assert taken_items.data["rows"] == [
+        ["product", "issued_quantity"],
+        ["Active Meter", 2],
+    ]
+    assert most_lent.status_code == 200
+    assert most_lent.data["rows"] == [
+        ["product_name", "times_lent", "total_quantity_lent"],
+        ["Active Meter", 1, 2],
+    ]
+    assert top_borrowers.status_code == 200
+    assert top_borrowers.data["rows"] == [
+        ["holder", "requests", "items_borrowed"],
+        ["reports-active-holder", 1, 2],
+    ]
 
 
 def test_superadmin_aggregate_reports_work_and_non_superadmin_is_forbidden():
