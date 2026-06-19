@@ -12,6 +12,11 @@ import { TenantProvider } from "./lib/tenant";
 if (localStorage.getItem("makerspace.theme") === "dark") {
   document.documentElement.classList.add("dark");
 }
+// Blueprint grid is on by default; only mark the DOM when it was turned off (FOUC-safe).
+document.documentElement.setAttribute(
+  "data-grid",
+  localStorage.getItem("makerspace.grid") === "off" ? "off" : "on",
+);
 cleanupLegacyAccessToken();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

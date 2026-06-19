@@ -2,42 +2,106 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Self-hosted fonts (no CDN/CSP dependency) ───────────────────────────────
+   Clash Display (Fontshare) for headings · Instrument Sans (body, variable) ·
+   JetBrains Mono (technical labels, variable). Latin subsets only. */
+@font-face {
+  font-family: "Clash Display";
+  src: url("/fonts/ClashDisplay-Semibold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Clash Display";
+  src: url("/fonts/ClashDisplay-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Sans";
+  src: url("/fonts/InstrumentSans-Variable.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Variable.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 @layer base {
   :root {
     /* Make native controls (select popups, date/number spinners, autofill) follow
        the theme — without this, dark mode renders white/light form fields. */
     color-scheme: light;
-    --color-accent: 37 99 235;
-    --color-ink: 17 24 39;
-    --color-bg: 248 250 252;
-    --color-surface: 241 245 249;
-    --color-panel: 255 255 255;
-    --color-muted: 100 116 139;
-    --color-line: 203 213 225;
-    --color-success: 22 163 74;
-    --color-danger: 220 38 38;
-    --color-warn: 217 119 6;
+    /* Blueprint Creative Lab — light "bright workshop" palette */
+    --color-accent: 167 58 0; /* electric orange #a73a00 (primary) */
+    --color-accent-bright: 255 92 0; /* #ff5c00 (hover / live) */
+    --color-secondary: 0 66 199; /* blueprint blue #0042c7 */
+    --color-ink: 25 28 29; /* carbon #191c1d */
+    --color-bg: 248 249 250; /* #f8f9fa */
+    --color-surface: 237 238 239; /* #edeeef container */
+    --color-panel: 255 255 255; /* #ffffff */
+    --color-muted: 87 83 78; /* warm gray #57534e */
+    --color-line: 25 28 29; /* bold borders are carbon, not gray */
+    --color-outline: 143 112 101; /* subtle chip border #8f7065 */
+    --color-success: 21 128 61; /* #15803d */
+    --color-danger: 186 26 26; /* #ba1a1a */
+    --color-warn: 180 83 9; /* #b45309 */
+    /* The hard "sticker" shadow block colour. */
+    --shadow-color: 25 28 29;
   }
 
   :root.dark {
     color-scheme: dark;
-    --color-accent: 251 185 5;
-    --color-ink: 229 231 235;
-    --color-bg: 9 9 11;
-    --color-surface: 17 24 39;
-    --color-panel: 24 24 27;
-    --color-muted: 156 163 175;
-    --color-line: 39 39 42;
+    /* Upgraded "night workshop" — brutalism translated to dark */
+    --color-accent: 255 92 0; /* vivid orange stays loud #ff5c00 */
+    --color-accent-bright: 255 122 51; /* lighter hover */
+    --color-secondary: 108 140 255; /* lightened blueprint blue #6c8cff */
+    --color-ink: 240 241 242; /* #f0f1f2 */
+    --color-bg: 12 13 14; /* #0c0d0e */
+    --color-surface: 27 29 31; /* #1b1d1f */
+    --color-panel: 20 21 23; /* #141517 */
+    --color-muted: 168 162 158; /* warm gray #a8a29e */
+    --color-line: 58 61 64; /* light outline so borders read on dark #3a3d40 */
+    --color-outline: 90 84 80; /* #5a5450 */
     --color-success: 34 197 94;
     --color-danger: 248 113 113;
     --color-warn: 245 158 11;
+    /* On dark, the offset block is a light outline so the sticker effect stays visible. */
+    --shadow-color: 58 61 64;
   }
 
   body {
     @apply bg-bg text-ink antialiased;
     font-family:
-      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-      "Segoe UI", sans-serif;
+      "Instrument Sans", ui-sans-serif, system-ui, -apple-system,
+      BlinkMacSystemFont, "Segoe UI", sans-serif;
+    /* 32px blueprint grid across the whole app (base background layer). Panels
+       sit on bg-panel, so the grid only shows in the gutters. */
+    background-image:
+      linear-gradient(to right, rgb(var(--color-ink) / 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(var(--color-ink) / 0.05) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  :root.dark body {
+    background-image:
+      linear-gradient(to right, rgb(255 255 255 / 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(255 255 255 / 0.04) 1px, transparent 1px);
+  }
+  html[data-grid="off"] body {
+    background-image: none;
+  }
+
+  /* Headings ride Clash Display by default — tight, editorial. */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Clash Display", ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.01em;
   }
 
   #root {
@@ -45,7 +109,7 @@
   }
 
   ::selection {
-    @apply bg-accent text-bg;
+    @apply bg-accent text-white;
   }
 
   /* Browser autofill ignores bg-* utilities and paints its own light background
@@ -64,7 +128,7 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply rounded-full bg-line;
+    @apply bg-line;
   }
 
   ::-webkit-scrollbar-track {
@@ -73,49 +137,97 @@
 }
 
 @layer components {
+  /* ── Blueprint structure ───────────────────────────────────────────────── */
+
+  /* 32px hairline grid — only on base background layers. Toggle with the
+     GridToggle component, which sets data-grid="off" on <html>. */
+  .blueprint-bg {
+    background-image:
+      linear-gradient(to right, rgb(var(--color-ink) / 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(var(--color-ink) / 0.05) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-position: center top;
+  }
+  :root.dark .blueprint-bg {
+    background-image:
+      linear-gradient(to right, rgb(255 255 255 / 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(255 255 255 / 0.04) 1px, transparent 1px);
+  }
+  html[data-grid="off"] .blueprint-bg {
+    background-image: none;
+  }
+
+  /* Bold borders instead of shadows. */
+  .brutal-border {
+    @apply border-2 border-ink;
+  }
+  .brutal-border-light {
+    @apply border border-ink;
+  }
+  /* Hover lift for "sticker" cards/buttons. */
+  .brutal-hover {
+    @apply transition-all duration-150;
+  }
+  .brutal-hover:hover {
+    box-shadow: 6px 6px 0 0 rgb(var(--shadow-color));
+    transform: translate(-2px, -2px);
+  }
+
+  /* Mono technical chip/badge. */
+  .chip {
+    @apply inline-flex items-center gap-1 border border-outline bg-surface px-2 py-1 font-mono text-xs font-medium uppercase text-ink;
+  }
+  .chip-available {
+    @apply border-ink bg-secondary text-white;
+  }
+  .chip-active {
+    @apply border-ink bg-accent text-white;
+  }
+
+  /* ── Desk shell (staff console + shared) — reskinned to Blueprint ───────── */
   .desk-shell {
     @apply min-h-screen bg-bg text-ink;
     background: rgb(var(--color-bg));
   }
 
   .desk-panel {
-    @apply rounded-md border border-line bg-panel shadow-sm;
+    @apply rounded border-2 border-ink bg-panel shadow-brutal-sm;
   }
 
   .desk-input {
-    @apply rounded-md border border-line bg-bg px-3 py-2 text-sm text-ink outline-none transition placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/20;
+    @apply rounded-sm border border-ink bg-bg px-3 py-2 text-sm text-ink outline-none transition placeholder:text-muted focus:border-secondary focus:ring-2 focus:ring-secondary/25;
   }
 
   .desk-button {
-    @apply inline-flex items-center justify-center rounded-md border border-line bg-panel px-3 py-2 text-sm font-semibold text-ink transition hover:border-accent/60 hover:bg-surface focus:outline-none focus:ring-2 focus:ring-accent/30;
+    @apply inline-flex items-center justify-center gap-2 rounded-sm border-2 border-ink bg-panel px-3 py-2 font-mono text-sm font-semibold uppercase tracking-tight text-ink transition-all hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/40;
   }
 
   .desk-button-primary {
-    @apply inline-flex items-center justify-center rounded-md bg-accent px-3 py-2 text-sm font-semibold text-bg shadow-sm shadow-accent/20 transition hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-accent/40;
+    @apply inline-flex items-center justify-center gap-2 rounded-sm border-2 border-ink bg-accent px-3 py-2 font-mono text-sm font-semibold uppercase tracking-tight text-white shadow-brutal-sm transition-all hover:-translate-y-0.5 hover:bg-accent-bright hover:shadow-brutal focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40;
   }
 
   .desk-nav-item {
-    @apply flex w-full items-center justify-between gap-2 rounded-md border-l-2 border-transparent px-3 py-2 text-sm font-medium text-ink transition hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30;
+    @apply flex w-full items-center justify-between gap-2 rounded-sm border-l-2 border-transparent px-3 py-2 text-sm font-medium text-ink transition-colors hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/30;
   }
 
   .desk-nav-item-active {
-    @apply border-accent bg-surface text-accent;
+    @apply border-accent bg-accent text-white;
   }
 
   .desk-tab {
-    @apply flex-1 rounded-md px-3 py-1.5 text-sm font-semibold text-muted transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30;
+    @apply flex-1 rounded-sm border-2 border-transparent px-3 py-1.5 font-mono text-sm font-semibold uppercase tracking-tight text-muted transition-colors hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/30;
   }
 
   .desk-tab-active {
-    @apply bg-accent text-bg;
+    @apply border-ink bg-accent text-white shadow-brutal-sm;
   }
 
   .desk-actions button {
-    @apply inline-flex items-center justify-center rounded-md border border-line bg-bg px-2 py-1 text-sm font-medium text-ink transition hover:border-accent/60 hover:bg-surface focus:outline-none focus:ring-2 focus:ring-accent/30;
+    @apply inline-flex items-center justify-center rounded-sm border border-ink bg-bg px-2 py-1 text-sm font-medium text-ink transition hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/30;
   }
 
   .desk-panel-body > button,
   .desk-panel-body > div > button {
-    @apply inline-flex items-center justify-center rounded-md bg-accent px-3 py-2 text-sm font-semibold text-bg transition hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-accent/40;
+    @apply inline-flex items-center justify-center gap-2 rounded-sm border-2 border-ink bg-accent px-3 py-2 font-mono text-sm font-semibold uppercase tracking-tight text-white shadow-brutal-sm transition-all hover:-translate-y-0.5 hover:bg-accent-bright hover:shadow-brutal focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40;
   }
 }
