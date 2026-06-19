@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ConfirmDialog, DataTable, FilterBar, Modal, StatusBadge } from "../../../components/ui";
 import type { DataTableColumn } from "../../../components/ui";
 import { staffRequest } from "../../../lib/api";
+import { ImageUploader } from "../ImageUploader";
 import { categoryResults, Panel, type Category, type CategoryListResponse, type Makerspace, type Product, useStaffGet } from "./shared";
 
 type AdminProduct = Product & {
@@ -107,6 +108,11 @@ export function Inventory({ makerspace, canViewAudit = false }: { makerspace: Ma
     setAdjustForm(emptyAdjust);
   };
   const columns: DataTableColumn<AdminProduct>[] = [
+    { key: "image", header: "", render: (product) => (
+      <div className="h-10 w-10 overflow-hidden border-2 border-ink bg-surface">
+        {product.image_url ? <img src={product.image_url} alt="" className="h-full w-full object-cover" /> : <div className="blueprint-bg h-full w-full" />}
+      </div>
+    ) },
     { key: "name", header: "Name", sortable: true, render: (product) => <button type="button" className="text-left font-semibold text-ink hover:text-accent" onClick={() => openEdit(product)}>{product.name}</button> },
     { key: "tracking_mode", header: "Mode", sortable: true },
     { key: "total_quantity", header: "Total", sortable: true },
@@ -142,6 +148,7 @@ export function Inventory({ makerspace, canViewAudit = false }: { makerspace: Ma
       </div>
       <ItemModal title="Add item" open={addOpen} onClose={() => setAddOpen(false)} form={form} setForm={setForm} categories={categoryRows} includeQuantities pending={create.isPending} error={create.error?.message} onSubmit={() => create.mutate()} />
       <ItemModal title={editing?.name ?? "Edit item"} open={Boolean(editing)} onClose={() => setEditing(null)} form={form} setForm={setForm} categories={categoryRows} pending={update.isPending} error={update.error?.message} onSubmit={() => update.mutate()}>
+        {editing ? <div className="border-t border-line pt-3"><ImageUploader endpoint={`/admin/inventory/${editing.id}/image`} currentUrl={editing.image_url} label="Item photo" onChanged={invalidate} /></div> : null}
         {editing ? <QuantityAdjust product={editing} form={adjustForm} setForm={setAdjustForm} pending={adjust.isPending} error={adjust.error?.message} onSubmit={() => adjust.mutate()} /> : null}
         {editing && canViewAudit ? <LendingHistory productId={editing.id} /> : null}
       </ItemModal>

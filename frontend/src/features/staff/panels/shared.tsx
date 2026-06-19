@@ -12,6 +12,8 @@ export type Makerspace = {
   frontend_domain: string | null;
   hidden_from_central_directory: boolean;
   superadmin_access_enabled?: boolean;
+  logo_url?: string | null;
+  cover_image_url?: string | null;
 };
 
 export type Product = {
@@ -28,6 +30,7 @@ export type Product = {
   tracking_mode: string;
   is_public: boolean;
   public_self_checkout_enabled: boolean;
+  image_url?: string | null;
 };
 
 export type Category = {

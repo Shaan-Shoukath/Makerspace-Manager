@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Badge } from "../../components/ui";
 import { staffRequest } from "../../lib/api";
+import { ImageUploader } from "./ImageUploader";
 import { Panel, type Makerspace, useStaffGet } from "./StaffPanels";
 
 type Props = {
@@ -81,9 +82,37 @@ export function MakerspaceSettingsPanel({ makerspace, isSuperadmin }: Props) {
     updateCustomDomain.isPending ||
     (!domainChanged && !hiddenChanged);
 
+  const refreshBranding = () => {
+    queryClient.invalidateQueries({ queryKey: ["makerspace-settings", makerspace.id] });
+    queryClient.invalidateQueries({ queryKey: ["makerspaces"] });
+    queryClient.invalidateQueries({ queryKey: ["staff", "makerspaces"] });
+  };
+
   return (
     <Panel title="Makerspace settings">
       <div className="grid gap-4">
+        <div className="rounded-md border border-line bg-bg p-4">
+          <h3 className="text-base font-semibold text-ink">Branding</h3>
+          <p className="mt-1 text-sm text-muted">
+            Logo and cover image shown on this makerspace&apos;s public pages. When no
+            logo is set, the makerspace name is shown as the wordmark.
+          </p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <ImageUploader
+              endpoint={`/admin/makerspace/${makerspace.id}/logo`}
+              currentUrl={settings.data?.logo_url}
+              label="Logo"
+              fit="contain"
+              onChanged={refreshBranding}
+            />
+            <ImageUploader
+              endpoint={`/admin/makerspace/${makerspace.id}/cover`}
+              currentUrl={settings.data?.cover_image_url}
+              label="Cover image"
+              onChanged={refreshBranding}
+            />
+          </div>
+        </div>
         <div className="rounded-md border border-line bg-bg p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="grid max-w-2xl gap-2">
