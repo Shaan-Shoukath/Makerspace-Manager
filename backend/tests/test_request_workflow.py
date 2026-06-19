@@ -750,6 +750,42 @@ def test_accept_individual_request_requires_available_assets_and_returns_409():
     assert AuditLog.objects.filter(action="request.accepted").count() == 0
 
 
+def test_accept_individual_request_counts_outstanding_reservations():
+    # Drifted bucket: quantity says 2 available but only ONE physical asset exists.
+    # The first 1-unit accept reserves it (the asset stays AVAILABLE until issue); the
+    # second 1-unit accept must be blocked because that lone asset is already spoken for
+    # by the outstanding reservation, not just by issued units.
+    makerspace = make_space("individual-asset-reserved")
+    product = make_product(
+        makerspace,
+        tracking_mode=TrackingMode.INDIVIDUAL,
+        total_quantity=2,
+        available_quantity=2,
+    )
+    InventoryAsset.objects.create(
+        makerspace=makerspace,
+        product=product,
+        asset_tag="IAR-1",
+        status=InventoryAsset.Status.AVAILABLE,
+    )
+    admin = make_member("individual-reserved-admin", makerspace)
+    client = authenticated_client(admin)
+
+    first = make_hardware_request(makerspace, product, quantity=1)
+    second = make_hardware_request(makerspace, product, quantity=1)
+
+    first_response = client.post(accept_url(first), format="json")
+    assert first_response.status_code == 200
+
+    second_response = client.post(accept_url(second), format="json")
+    assert second_response.status_code == 409
+    assert second_response.data["code"] == "insufficient_stock"
+    product.refresh_from_db()
+    assert product.reserved_quantity == 1
+    second.refresh_from_db()
+    assert second.status == HardwareRequest.Status.PENDING_APPROVAL
+
+
 def test_cross_tenant_accept_returns_404_without_leaking_request_existence():
     own_space = make_space("cross-tenant-own")
     other_space = make_space("cross-tenant-other")

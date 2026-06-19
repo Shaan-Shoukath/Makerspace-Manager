@@ -145,7 +145,14 @@ def reserve_for_request(request):
 
 
 def assert_individual_assets_available(product, required_qty):
-    """Fail fast when quantity buckets outpace serialized asset rows."""
+    """Fail fast when quantity buckets outpace serialized asset rows.
+
+    Individual-mode asset rows only flip AVAILABLE->ISSUED at handover, so a unit
+    that is accepted-but-not-yet-issued still leaves its asset row AVAILABLE while
+    `reserved_quantity` is incremented. Counting AVAILABLE assets alone would let a
+    drifted-high quantity bucket reserve the same physical asset for two requests;
+    subtract the already-reserved (committed-but-unissued) units so the available
+    physical assets must cover this request PLUS every outstanding reservation."""
     required_qty = int(required_qty)
     if product.tracking_mode != TrackingMode.INDIVIDUAL or required_qty <= 0:
         return
@@ -154,10 +161,12 @@ def assert_individual_assets_available(product, required_qty):
         product_id=product.pk,
         status=InventoryAsset.Status.AVAILABLE,
     ).count()
-    if available_assets < required_qty:
+    already_reserved = max(int(getattr(product, "reserved_quantity", 0) or 0), 0)
+    if available_assets < required_qty + already_reserved:
         raise InsufficientStock(
             f"Insufficient available assets for product {product.pk}: "
-            f"requested {required_qty}, available {available_assets}."
+            f"requested {required_qty}, already reserved {already_reserved}, "
+            f"available assets {available_assets}."
         )
 
 
